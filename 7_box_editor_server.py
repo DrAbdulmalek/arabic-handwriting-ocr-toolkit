@@ -63,7 +63,7 @@ PANEL_PATH = TOOLKIT / "control_panel.html"
 ADJ_LOG = TOOLKIT / "ocr_data/box_adjustments.jsonl"
 APP_LOG = TOOLKIT / "ocr_data/app_log.jsonl"      # سجل النشاط العام
 TELEMETRY = TOOLKIT / "ocr_data/telemetry.json"   # إذن إرسال البيانات للمطوّر
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 
 _db_lock = threading.RLock()  # قابل لإعادة الدخول: log_adj يُستدعى داخل الحاملين للقفل
 _img_cache = {}
@@ -514,6 +514,26 @@ def _page_lines(name):
     return lines
 
 
+# ─────────────────── قفل المربعات المؤكدة ───────────────────
+_LOCKED_READY = False
+
+
+def _ensure_locked_column():
+    """هجرة قواعد البيانات القديمة: إضافة عمود locked (يُنفَّذ مرة واحدة)."""
+    global _LOCKED_READY
+    if _LOCKED_READY:
+        return
+    with _db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(crops)")]
+        if "locked" not in cols:
+            conn.execute(
+                "ALTER TABLE crops ADD COLUMN locked INTEGER DEFAULT 0")
+            conn.commit()
+        conn.close()
+    _LOCKED_READY = True
+
+
 def api_pages():
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("""
@@ -529,17 +549,19 @@ def api_pages():
 
 
 def api_page(name):
+    _ensure_locked_column()
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("""
         SELECT id, x1, y1, x2, y2, label, language, confidence,
-               verified, ignored, split
+               verified, ignored, split, locked
         FROM crops WHERE page_name=? ORDER BY id""", (name,)).fetchall()
     conn.close()
     lines = _page_lines(name)
     words = [{"id": r[0], "x1": r[1], "y1": r[2], "x2": r[3], "y2": r[4],
               "label": r[5] or "", "language": r[6] or "arabic",
               "confidence": r[7], "verified": bool(r[8]),
-              "ignored": bool(r[9]), "split": r[10] or "train"}
+              "ignored": bool(r[9]), "split": r[10] or "train",
+              "locked": bool(r[11]) if r[11] is not None else False}
              for r in rows]
     words.sort(key=lambda w: (w["y1"], w["x1"]))
     w, h = PAGE_SIZE.get(name, (0, 0))
@@ -552,6 +574,12 @@ def api_page(name):
 
 
 def api_update(items):
+    """تحديث المربعات. القواعد:
+    • القفل التلقائي: عنصر يرسل verified بلا مفتاح locked صريح ⇒
+      locked = verified (قفل عند التأكيد والحفظ، فتح عند إلغائه).
+    • حرس القفل: مربع مقفل ولا يفتح هذا الطلب صراحةً ⇒ تُتجاهل إحداثياته
+      الواردة ويبقى موضعه كما هو (لا يتحرك أبدًا حتى إلغاء القفل)."""
+    _ensure_locked_column()
     out = []
     with _db_lock:
         conn = sqlite3.connect(DB_PATH)
@@ -561,20 +589,23 @@ def api_update(items):
                                (it["id"],)).fetchone()
             if not row:
                 continue
+            can_geom = (not row["locked"]) or (it.get("locked") in (0, False))
             old = {"x1": row["x1"], "y1": row["y1"], "x2": row["x2"],
                    "y2": row["y2"], "label": row["label"],
                    "verified": row["verified"], "ignored": row["ignored"],
-                   "language": row["language"]}
+                   "language": row["language"], "locked": row["locked"]}
             sets, vals = [], []
             for k in ("x1", "y1", "x2", "y2"):
-                if k in it:
+                if k in it and can_geom:
                     sets.append(f"{k}=?"); vals.append(int(it[k]))
             for k in ("label", "language"):
                 if k in it:
                     sets.append(f"{k}=?"); vals.append(str(it[k]))
-            for k in ("verified", "ignored"):
+            for k in ("verified", "ignored", "locked"):
                 if k in it:
                     sets.append(f"{k}=?"); vals.append(1 if it[k] else 0)
+            if "locked" not in it and "verified" in it:
+                sets.append("locked=?"); vals.append(1 if it["verified"] else 0)
             if sets:
                 conn.execute(f"UPDATE crops SET {', '.join(sets)} WHERE id=?",
                              vals + [it["id"]])
@@ -592,7 +623,8 @@ def api_update(items):
                         "label": new["label"], "language": new["language"],
                         "verified": bool(new["verified"]),
                         "ignored": bool(new["ignored"]),
-                        "split": new["split"]})
+                        "split": new["split"],
+                        "locked": bool(new["locked"])})
         conn.close()
     return {"words": out}
 
@@ -646,6 +678,7 @@ def api_delete(ids):
 
 
 def api_merge(keep_id, drop_id):
+    _ensure_locked_column()
     with _db_lock:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
@@ -654,6 +687,9 @@ def api_merge(keep_id, drop_id):
         if not k or not d or k["page_name"] != d["page_name"]:
             conn.close()
             return {"error": "المربعان غير صالحين للدمج"}
+        if k["locked"] or d["locked"]:
+            conn.close()
+            return {"error": "أحد المربعين مقفل — ألغِ القفل أولًا"}
         box = (min(k["x1"], d["x1"]), min(k["y1"], d["y1"]),
                max(k["x2"], d["x2"]), max(k["y2"], d["y2"]))
         label = k["label"] or d["label"]
@@ -749,7 +785,9 @@ def api_tighten(p):
     """تقليص المربعات إلى حدود الحبر تمامًا — بلا أي فراغ أبيض — كحفظ
     الـpatterns في ABBYY FineReader، مع إعادة قص صور القصاصات فورًا حتى
     لا تختلف أبعاد البيانات عند التدريب. ids=None يقلّص كل مربعات الصفحة
-    غير المتجاهلة؛ التقليص لا يوسّع أبدًا ولا يلمس ما هو ملاصق أصلًا."""
+    غير المتجاهلة وغير المقفلة؛ التقليص لا يوسّع أبدًا ولا يلمس ما هو
+    ملاصق أصلًا، والمربع المقفل يُتخطى ولا يتحرك."""
+    _ensure_locked_column()
     name = p["page_name"]
     ids = p.get("ids")
     conn = sqlite3.connect(DB_PATH)
@@ -757,12 +795,13 @@ def api_tighten(p):
         ph = ",".join("?" for _ in ids)
         rows = conn.execute(
             f"""SELECT id, crop_path, x1, y1, x2, y2 FROM crops
-                WHERE page_name=? AND ignored=0 AND id IN ({ph})""",
+                WHERE page_name=? AND ignored=0 AND locked=0
+                AND id IN ({ph})""",
             (name, *[int(i) for i in ids])).fetchall()
     else:
         rows = conn.execute(
             """SELECT id, crop_path, x1, y1, x2, y2 FROM crops
-               WHERE page_name=? AND ignored=0 ORDER BY id""",
+               WHERE page_name=? AND ignored=0 AND locked=0 ORDER BY id""",
             (name,)).fetchall()
     img = page_gray(name)
     updated, regen = [], []
@@ -1258,6 +1297,7 @@ def main():
             ans = ""
         set_consent(ans in ("y", "yes"))
         c = ans in ("y", "yes")
+    _ensure_locked_column()   # هجرة قواعد البيانات القديمة قبل أي طلب
     app_log("server_start", port=args.port, host=args.host, consent=c)
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)

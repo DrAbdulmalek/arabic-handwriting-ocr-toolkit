@@ -91,6 +91,7 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <span style="flex:1"></span>
     <span class="legend"><span class="sw" style="background:#2563eb"></span>آلي</span>
     <span class="legend"><span class="sw" style="background:#16a34a"></span>مؤكد</span>
+    <span class="legend"><span class="sw" style="background:#7c3aed"></span>🔒 مقفل</span>
     <span class="legend"><span class="sw" style="background:#94a3b8"></span>متجاهل</span>
     <span class="legend"><span class="sw" style="background:#f59e0b"></span>المحدد</span>
   </div>
@@ -124,6 +125,7 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <button class="danger" id="delBtn">🗑 تجاهل</button>
     <button id="regenBtn" title="إعادة قص صورة القصاصة بالحدود الحالية">↻ إعادة قص</button>
     <button id="tightenBtn" title="تقليص المربع المحدد إلى حدود الحبر تمامًا (نمط ABBYY) وإعادة قصه">⤡ ضيّق</button>
+    <button id="lockBtn" title="قفل المربع فلا يتحرك إطلاقًا — يُقفل تلقائيًا عند اختيار مؤكد وحفظ. لتحريك مربع مقفل: انقره ثم اضغط إلغاء القفل">🔒 قفل</button>
     <span class="sep"></span>
     <span class="lbl" id="confInfo"></span>
     <span style="flex:1"></span>
@@ -145,6 +147,8 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <b>فاصل الأعمدة</b> في صفحات العمودين (يُرسم بخط أحمر متقطع — زر «الفاصل» يظهره/يخفيه).
     <b>⤡ ضيّق</b> يقلّص المربع المحدد و<b>ضيّق الكل</b> يقلّص مربعات الصفحة كلها إلى
     حدود الحبر تمامًا مع إعادة قص القصاصات فورًا — فلا تختلف أبعاد بيانات التدريب.
+    <b>🔒 قفل</b>: اختيار «✓ مؤكد» + الحفظ يقفل المربع تلقائيًا فلا يتحرك أو يُقسم أو يُدمج أبدًا؛
+    لتحريك مربع مقفل انقره ثم اضغط <b>🔓 إلغاء القفل</b> (أو ألغِ «مؤكد»)، وإيقاع «✓ مؤكد + التالي» يقفل ما أكدته أيضًا.
     <b>⬇ TXT / DOCX</b> تصدّر نص الصفحة بترتيب القراءة: <b>المجموعة العلوية أولًا</b> (حتى مجموعات زوايا
     الصفحة) ثم ما يليها، وبداخل السطر من اليمين لليسار للعربية.
     كل عمليات البرنامج تُسجَّل محليًا في <b>ocr_data/app_log.jsonl</b> (تُقرأ من /api/log)، وإرسال بيانات
@@ -318,8 +322,9 @@ function syncSelBar() {
   $("confInfo").textContent = w && w.confidence != null ? `ثقة آلية: ${w.confidence.toFixed(2)}` : "";
   $("labelIn").disabled = !w; $("langSel").disabled = !w;
   $("verChk").disabled = !w; $("ignChk").disabled = !w;
-  ["wider", "narrower", "growL", "shrinkL", "growR", "shrinkR", "splitBtn", "mergeBtn", "delBtn", "regenBtn", "tightenBtn"]
+  ["wider", "narrower", "growL", "shrinkL", "growR", "shrinkR", "splitBtn", "mergeBtn", "delBtn", "regenBtn", "tightenBtn", "lockBtn"]
     .forEach(id => $(id).disabled = !w);
+  $("lockBtn").textContent = w && w.locked ? "🔓 إلغاء القفل" : "🔒 قفل";
 }
 
 function draw() {
@@ -371,6 +376,16 @@ function draw() {
     ctx.setLineDash([]);
     if (wd.verified && !wd.ignored) { ctx.fillStyle = "rgba(22,163,74,.10)"; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y); }
     if (wd === S.sel) { ctx.fillStyle = "rgba(245,158,11,.12)"; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y); }
+    if (wd.locked && !wd.ignored) {   // أيقونة قفل صغيرة أعلى يمين المربع
+      const s = Math.max(6, Math.min(10, 8 * V.s));
+      const lx = b.x - s * .7 - 3, ly = a.y + 3;
+      ctx.strokeStyle = ctx.fillStyle = "#7c3aed";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(lx + s * .35, ly + s * .35, s * .35, Math.PI, 0);
+      ctx.stroke();
+      ctx.fillRect(lx, ly + s * .35, s * .7, s * .55);
+    }
     if (S.showLabels && V.s >= 1.4 && wd.label) {
       ctx.fillStyle = col; ctx.font = `${Math.min(13, Math.max(9, 11 * V.s / 3))}px sans-serif`;
       ctx.textAlign = "right"; ctx.direction = "rtl";
@@ -438,7 +453,7 @@ cv.addEventListener("pointerdown", ev => {
     return;
   }
   const hd = hitHandle(p.x, p.y, viewFor());
-  if (hd) {
+  if (hd && S.sel && !S.sel.locked) {
     S.drag = {type: "resize", h: hd, orig: {...S.sel}};
     return;
   }
@@ -448,7 +463,8 @@ cv.addEventListener("pointerdown", ev => {
     if (S.mode === "page") S.lineIdx = wd.line;
     S.freeView = null;
     syncSelBar(); syncLinePos(); draw();
-    S.drag = {type: "move", dx: p.x - wd.x1, dy: p.y - wd.y1};
+    // المربع المقفل يُحدد بالنقر ولا يُسحب — فتح القفل أولًا لتحريكه
+    if (!wd.locked) S.drag = {type: "move", dx: p.x - wd.x1, dy: p.y - wd.y1};
     return;
   }
   if (S.mode === "zoom") {
@@ -555,7 +571,7 @@ async function saveDirty() {
   const items = [...S.dirty].map(id => wordById(id)).filter(Boolean)
     .map(w => ({id: w.id, x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2,
                 label: w.label, verified: w.verified, ignored: w.ignored,
-                language: w.language}));
+                language: w.language, locked: w.locked ? 1 : 0}));
   try {
     await jpost("/api/update", {items});
     S.dirty.clear();
@@ -570,6 +586,7 @@ async function saveDirty() {
 /* ───────── أدوات المربع ───────── */
 function nudge(dx1, dy1, dx2, dy2) {
   if (!S.sel) return;
+  if (S.sel.locked) { status("🔒 المربع مقفل — اضغط 🔓 إلغاء القفل للتحريك"); return; }
   const w = S.sel, W = S.data.width, H = S.data.height;
   w.x1 = clamp(w.x1 + dx1, 0, w.x2 - 4);
   w.y1 = clamp(w.y1 + dy1, 0, w.y2 - 4);
@@ -594,6 +611,7 @@ $("delBtn").onclick = () => {
 $("splitBtn").onclick = () => {
   if (!S.sel) return;
   const w = S.sel;
+  if (w.locked) { status("🔒 المربع مقفل — ألغِ القفل أولًا"); return; }
   const mid = Math.round((w.x1 + w.x2) / 2);
   if (mid - w.x1 < 4 || w.x2 - mid < 4) { status("✗ المربع ضيق للقسمة", true); return; }
   const right = {x1: mid + 1, y1: w.y1, x2: w.x2, y2: w.y2};
@@ -620,6 +638,7 @@ $("mergeBtn").onclick = () => {
   if (!S.sel) return;
   const w = S.sel, nb = neighborOf(w);
   if (!nb) return;
+  if (w.locked || nb.locked) { status("🔒 أحد المربعين مقفل — ألغِ القفل أولًا"); return; }
   jpost("/api/merge", {keep_id: w.id, drop_id: nb.id}).then(() => {
     w.x1 = Math.min(w.x1, nb.x1); w.y1 = Math.min(w.y1, nb.y1);
     w.x2 = Math.max(w.x2, nb.x2); w.y2 = Math.max(w.y2, nb.y2);
@@ -659,8 +678,28 @@ async function tightenWords(ids) {
     draw();
   } catch (e) { status("✗ تقليص: " + e.message, true); }
 }
-$("tightenBtn").onclick = () => { if (S.sel) tightenWords([S.sel.id]); };
+$("tightenBtn").onclick = () => {
+  if (S.sel && S.sel.locked) { status("🔒 المربع مقفل — ألغِ القفل أولًا"); return; }
+  if (S.sel) tightenWords([S.sel.id]);
+};
 $("tightenAllBtn").onclick = () => tightenWords(null);
+
+/* ───────── قفل المربع ───────── */
+$("lockBtn").onclick = async () => {
+  if (!S.sel) return;
+  const w = S.sel;
+  w.locked = w.locked ? 0 : 1;
+  try {
+    await jpost("/api/update", {items: [{id: w.id, locked: w.locked}]});
+    status(w.locked ? "🔒 قُفل المربع — لن يتحرك حتى إلغاء القفل"
+                    : "🔓 فُتح المربع — يمكنك تحريكه الآن");
+    tel("lock_toggle");
+    syncSelBar(); draw();
+  } catch (e) {
+    w.locked = w.locked ? 0 : 1;
+    status("✗ " + e.message, true);
+  }
+};
 function log(...a) { console.log("تعديل:", ...a); }
 
 /* ───────── شريط التحديد ───────── */
@@ -680,8 +719,10 @@ $("langSel").addEventListener("change", () => {
 $("verChk").addEventListener("change", () => {
   if (!S.sel) return;
   S.sel.verified = $("verChk").checked;
+  S.sel.locked = S.sel.verified ? 1 : 0;   // القفل التلقائي عند التأكيد وإلغائه
   markDirty(S.sel); draw(); refreshPages();
-  if (S.sel.verified) status("✓ مؤكد");
+  if (S.sel.verified) status("✓ مؤكد — 🔒 قُفل المربع (يُحفظ تلقائيًا)");
+  else status("أُلغي التأكيد — 🔓 فُتح المربع");
 });
 $("ignChk").addEventListener("change", () => {
   if (!S.sel) return;
@@ -697,6 +738,7 @@ function confirmAndNext() {
   if (!S.sel) return;
   const w = S.sel;
   w.verified = true;
+  w.locked = 1;   // القفل التلقائي عند التأكيد
   markDirty(w);
   const act = activeWords().filter(x => x.line === w.line && !x.verified);
   act.sort((a, b) => a.x1 - b.x1);
