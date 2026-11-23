@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مراجعة وتعديل مربعات الكلمات — OCR الخط اليدوي</title>
+<style>
+:root{
+  --bg:#eef2f7; --card:#ffffff; --ink:#0f172a; --mut:#64748b;
+  --acc:#059669; --acc2:#2563eb; --warn:#f59e0b; --bad:#dc2626; --line:#e2e8f0;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;height:100dvh}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:.5rem .75rem;flex:0 0 auto}
+.hrow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.35rem}
+.hrow:last-child{margin-bottom:0}
+h1{font-size:clamp(.9rem,2.6vw,1.15rem);margin:0 0 .1rem;color:var(--acc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+select,input[type=text],input[type=number]{font:inherit;padding:.3rem .5rem;border:1px solid var(--line);border-radius:.5rem;background:#fff;color:var(--ink)}
+select{max-width:52vw}
+button{font:inherit;padding:.32rem .65rem;border:1px solid var(--line);border-radius:.5rem;background:#fff;color:var(--ink);cursor:pointer;transition:.15s}
+button:hover{border-color:var(--acc);color:var(--acc)}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+button.warn{border-color:var(--warn);color:#b45309}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button:disabled{opacity:.45;cursor:default}
+.lbl{font-size:.75rem;color:var(--mut)}
+progress{width:130px;height:.7rem;vertical-align:middle}
+#saveState{font-size:.78rem;color:var(--mut);min-width:5.5em}
+#saveState.err{color:var(--bad);font-weight:bold}
+main{flex:1 1 auto;position:relative;min-height:0;background:#cbd5e1}
+#cv{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:default}
+aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75rem;flex:0 0 auto}
+.arow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.arow+.arow{margin-top:.35rem}
+#labelIn{width:11em;text-align:right}
+.arow .sep{width:1px;height:1.4rem;background:var(--line);margin:0 .15rem}
+#hint{font-size:.72rem;color:var(--mut)}
+#helpBox{font-size:.8rem;color:var(--mut);line-height:1.7;margin-top:.4rem;border-top:1px dashed var(--line);padding-top:.4rem}
+.legend{display:inline-flex;align-items:center;gap:.3rem;margin-inline-start:.6rem;font-size:.72rem;color:var(--mut)}
+.sw{width:.9em;height:.9em;border-radius:.2rem;display:inline-block}
+@media (max-width:640px){
+  h1{white-space:normal}
+  progress{width:90px}
+  #labelIn{width:9em}
+  button{padding:.3rem .5rem}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>📝 مراجعة وتعديل مربعات الكلمات</h1>
+  <div class="hrow">
+    <select id="pageSel" title="اختيار الصفحة"></select>
+    <button id="prevPage">▶ السابقة</button>
+    <button id="nextPage">التالية ◀</button>
+    <select id="filterSel" title="فلتر الصفحات">
+      <option value="all">كل الصفحات</option>
+      <option value="todo">غير المكتملة فقط</option>
+    </select>
+    <span class="lbl" id="pagePos"></span>
+    <progress id="prog" max="100" value="0"></progress>
+    <span class="lbl" id="progTxt"></span>
+    <span style="flex:1"></span>
+    <span id="saveState">—</span>
+    <button id="saveBtn">💾 حفظ</button>
+  </div>
+  <div class="hrow">
+    <span class="lbl">العرض:</span>
+    <button id="mPage" class="on">صفحة كاملة</button>
+    <button id="mLine">سطر</button>
+    <button id="mZoom">جزء مكبّر</button>
+    <label class="lbl">تكبير <input type="range" id="zoomR" min="1.5" max="8" step="0.5" value="3" style="vertical-align:middle"></label>
+    <span class="lbl" id="linePos"></span>
+    <button id="prevLine">سطر ▲</button>
+    <button id="nextLine">▼ سطر</button>
+    <label class="lbl"><input type="checkbox" id="showLines" checked> الأسطر</label>
+    <label class="lbl"><input type="checkbox" id="showLabels"> الوسوم</label>
+    <button id="addBtn">➕ مربع جديد</button>
+    <span style="flex:1"></span>
+    <span class="legend"><span class="sw" style="background:#2563eb"></span>آلي</span>
+    <span class="legend"><span class="sw" style="background:#16a34a"></span>مؤكد</span>
+    <span class="legend"><span class="sw" style="background:#94a3b8"></span>متجاهل</span>
+    <span class="legend"><span class="sw" style="background:#f59e0b"></span>المحدد</span>
+  </div>
+</header>
+
+<main><canvas id="cv"></canvas></main>
+
+<aside>
+  <div class="arow" id="selBar">
+    <span class="lbl">المحدد:</span>
+    <span class="lbl" id="selInfo">لا شيء</span>
+    <input type="text" id="labelIn" placeholder="الوسم…" dir="auto">
+    <select id="langSel" title="اللغة">
+      <option value="arabic">عربي</option>
+      <option value="english">إنجليزي</option>
+    </select>
+    <label class="lbl"><input type="checkbox" id="verChk"> ✓ مؤكد</label>
+    <label class="lbl"><input type="checkbox" id="ignChk"> تجاهل</label>
+  </div>
+  <div class="arow">
+    <span class="lbl">أفقياً:</span>
+    <button id="wider" title="توسيع من الجانبين">أوسع +</button>
+    <button id="narrower" title="تضييق من الجانبين">أضيق −</button>
+    <button id="growL" title="تمديد الحافة اليمنى">يمين +</button>
+    <button id="shrinkL">يمين −</button>
+    <button id="growR" title="تمديد الحافة اليسرى">يسار +</button>
+    <button id="shrinkR">يسار −</button>
+    <span class="sep"></span>
+    <button class="warn" id="splitBtn">✂ تقسيم</button>
+    <button class="warn" id="mergeBtn">⇥ دمج مع الجار</button>
+    <button class="danger" id="delBtn">🗑 تجاهل</button>
+    <button id="regenBtn" title="إعادة قص صورة القصاصة بالحدود الحالية">↻ إعادة قص</button>
+    <span class="sep"></span>
+    <span class="lbl" id="confInfo"></span>
+    <span style="flex:1"></span>
+    <button id="helpBtn">؟ مساعدة</button>
+  </div>
+  <div id="helpBox" hidden>
+    <b>الطريقة:</b> انقر مربعًا لتحديده، ثم اسحب حوافه أو زواياه لتوسيعه/تضييقه (أسحب داخل المربع لتحريكه).
+    إن كان المربع لا يشمل الكلمة كاملة → مدّد الحافة؛ إن ضمّ كلمتين → <b>✂ تقسيم</b> ثم اضبط النصفين؛
+    إن قُسّمت كلمة على مربعين → <b>دمج مع الجار</b>. حرّك الأسهم للتنقل بين الأسطر في عرض «سطر/جزء مكبّر»،
+    وانقر <b>➕ مربع جديد</b> ثم ارسم مستطيلًا لكلمة لم يلتقطها التقسيم الآلي.
+    <b>الحفظ تلقائي</b> بعد ثانية من كل تعديل، وكل تغيير يُسجَّل في سجل تدقيق، وصورة القصاصة تُعاد تلقائيًا بالحدود الجديدة.
+    <b>اختصارات:</b> Enter = تأكيد الوسم والانتقال للكلمة التالية · الأسهم = تحريك المربع (مع Shift أسرع) ·
+    <b>[ ]</b> = توسيع/تضييق ±5px · Delete = تجاهل · Esc = إلغاء التحديد · s = حفظ · Tab = الكلمة التالية في السطر.
+    في العرض المكبّر اسحب الفراغ لتحريك العرض.
+  </div>
+</aside>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const S = {
+  pages: [], pIdx: 0, data: null, img: null,
+  mode: "page", lineIdx: 0, zoom: 3, sel: null,
+  dirty: new Set(), saving: false,
+  addMode: false, drag: null, hoverLine: -1,
+  freeView: null, showLines: true, showLabels: false,
+  filter: "all", lineCrops: new Map(),
+};
+let DPR = 1;
+
+/* ───────── الحالة العامة ───────── */
+async function jget(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+  return r.json();
+}
+async function jpost(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+  return r.json();
+}
+function status(txt, err) {
+  const el = $("saveState");
+  el.textContent = txt;
+  el.className = err ? "err" : "";
+}
+function wordById(id) { return S.data ? S.data.words.find(w => w.id === id) : null; }
+function activeWords() { return S.data.words.filter(w => !w.ignored); }
+
+/* ───────── ربط كلمة بسطرها ───────── */
+function lineOf(w) {
+  const cx = (w.x1 + w.x2) / 2, cy = (w.y1 + w.y2) / 2;
+  let best = 0, bd = Infinity;
+  S.data.lines.forEach((l, i) => {
+    const dx = Math.max(l.x1 - cx, 0, cx - l.x2), dy = Math.max(l.y1 - cy, 0, cy - l.y2);
+    const inside = dx === 0 && dy === 0;
+    const d = inside ? 0 : Math.hypot(dx, dy);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+
+/* ───────── تحميل الصفحات ───────── */
+async function loadPages() {
+  const j = await jget("/api/pages");
+  S.pages = j.pages;
+  fillPages();
+  updateProg(j);
+}
+function fillPages() {
+  const list = S.filter === "todo"
+    ? S.pages.filter(p => p.words - p.ignored > p.verified)
+    : S.pages;
+  const sel = $("pageSel");
+  sel.innerHTML = "";
+  list.forEach(p => {
+    const o = document.createElement("option");
+    o.value = p.name;
+    o.textContent = `${p.name}  (${p.verified}/${p.words - p.ignored})`;
+    sel.appendChild(o);
+  });
+  const cur = S.data ? S.data.name : (list[0] && list[0].name);
+  if (cur && list.some(p => p.name === cur)) sel.value = cur;
+  S.pIdx = list.findIndex(p => p.name === cur);
+}
+function updateProg(j) {
+  const pct = j.total_active ? Math.round(100 * j.total_verified / j.total_active) : 0;
+  $("prog").value = pct;
+  $("progTxt").textContent = `${j.total_verified}/${j.total_active} كلمة مؤكدة (${pct}%)`;
+}
+async function refreshPages() {
+  const j = await jget("/api/pages");
+  S.pages = j.pages;
+  fillPages();
+  updateProg(j);
+}
+
+async function loadPage(name) {
+  status("… تحميل الصفحة");
+  const d = await jget("/api/page?name=" + encodeURIComponent(name));
+  d.words.forEach(w => { w.line = -1; });
+  S.data = d;
+  S.sel = null; S.dirty.clear(); S.freeView = null;
+  S.lineCrops.clear();
+  d.words.forEach(w => { w.line = lineOf(w); });
+  const img = new Image();
+  img.src = "/img/page?name=" + encodeURIComponent(name) + "&t=" + Date.now();
+  await img.decode();
+  S.img = img;
+  // ابدأ من أول كلمة غير مؤكدة
+  const first = d.words.find(w => !w.ignored && !w.verified);
+  if (first) S.lineIdx = first.line;
+  syncLinePos(); syncSelBar(); fillPages();
+  status("✓ جاهزة");
+  draw();
+}
+
+/* ───────── العرض والتحويلات ───────── */
+function viewFor() {
+  const W = S.data.width, H = S.data.height;
+  const cw = cv.clientWidth, ch = cv.clientHeight;
+  if (S.mode === "page") {
+    const s = Math.min(cw / W, ch / H);
+    // اصطلاح نافذة العرض (كما في السطر/التكبير): زاوية النافذة بإحداثيات الصفحة
+    return {s, ox: (W - cw / s) / 2, oy: (H - ch / s) / 2};
+  }
+  const L = S.data.lines[S.lineIdx] || {x1: 0, y1: 0, x2: W, y2: H};
+  let rx1 = L.x1 - 12, ry1 = L.y1 - 10, rx2 = L.x2 + 12, ry2 = L.y2 + 10;
+  if (S.mode === "zoom") {
+    if (S.freeView) return {s: S.zoom, ox: S.freeView.ox, oy: S.freeView.oy};
+    const s = S.zoom, vw = cw / s, vh = ch / s;
+    const cx = S.sel ? (S.sel.x1 + S.sel.x2) / 2 : (rx1 + rx2) / 2;
+    const cy = S.sel ? (S.sel.y1 + S.sel.y2) / 2 : (ry1 + ry2) / 2;
+    return {s, ox: clamp(cx - vw / 2, 0, Math.max(0, W - vw)),
+               oy: clamp(cy - vh / 2, 0, Math.max(0, H - vh))};
+  }
+  const s = Math.min(cw / Math.max(1, rx2 - rx1), ch / Math.max(1, ry2 - ry1));
+  return {s, ox: (rx1 + rx2) / 2 - cw / (2 * s), oy: (ry1 + ry2) / 2 - ch / (2 * s)};
+}
+function toPage(px, py, V) { return {x: px / V.s + V.ox, y: py / V.s + V.oy}; }
+function toScreen(x, y, V) { return {x: (x - V.ox) * V.s, y: (y - V.oy) * V.s}; }
+
+const COLORS = {auto: "#2563eb", verified: "#16a34a", ignored: "#94a3b8", sel: "#f59e0b", line: "#0891b2", add: "#dc2626"};
+
+function syncLinePos() {
+  const n = S.data ? S.data.lines.length : 0;
+  $("linePos").textContent = n ? `سطر ${S.lineIdx + 1}/${n}` : "";
+}
+function syncSelBar() {
+  const w = S.sel;
+  $("selInfo").textContent = w ? `#${w.id} (${w.x2 - w.x1}×${w.y2 - w.y1}px)` : "لا شيء";
+  $("labelIn").value = w ? w.label : "";
+  $("langSel").value = w ? (w.language || "arabic") : "arabic";
+  $("verChk").checked = !!(w && w.verified);
+  $("ignChk").checked = !!(w && w.ignored);
+  $("confInfo").textContent = w && w.confidence != null ? `ثقة آلية: ${w.confidence.toFixed(2)}` : "";
+  $("labelIn").disabled = !w; $("langSel").disabled = !w;
+  $("verChk").disabled = !w; $("ignChk").disabled = !w;
+  ["wider", "narrower", "growL", "shrinkL", "growR", "shrinkR", "splitBtn", "mergeBtn", "delBtn", "regenBtn"]
+    .forEach(id => $(id).disabled = !w);
+}
+
+function draw() {
+  if (!S.data || !S.img) return;
+  DPR = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== w * DPR || cv.height !== h * DPR) { cv.width = w * DPR; cv.height = h * DPR; }
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const V = viewFor();
+  // الصورة (قص المصدر للمنطقة الظاهرة فقط)
+  const W = S.data.width, H = S.data.height;
+  const sx = clamp(V.ox, 0, W), sy = clamp(V.oy, 0, H);
+  const sw = Math.min(W - sx, w / V.s), sh = Math.min(H - sy, h / V.s);
+  ctx.imageSmoothingEnabled = V.s < 1.6;
+  ctx.drawImage(S.img, sx, sy, sw, sh, (sx - V.ox) * V.s, (sy - V.oy) * V.s, sw * V.s, sh * V.s);
+  // الأسطر
+  if (S.showLines) {
+    ctx.strokeStyle = COLORS.line; ctx.lineWidth = 1; ctx.setLineDash([6, 4]);
+    S.data.lines.forEach((l, i) => {
+      const a = toScreen(l.x1, l.y1, V), b = toScreen(l.x2, l.y2, V);
+      if (b.x < 0 || a.x > w || b.y < 0 || a.y > h) return;
+      ctx.globalAlpha = i === S.lineIdx && S.mode !== "page" ? 1 : 0.55;
+      ctx.lineWidth = i === S.lineIdx ? 2 : 1;
+      ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    });
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  // الكلمات
+  for (const wd of S.data.words) {
+    const a = toScreen(wd.x1, wd.y1, V), b = toScreen(wd.x2, wd.y2, V);
+    if (b.x < 0 || a.x > w || b.y < 0 || a.y > h) continue;
+    const col = wd.ignored ? COLORS.ignored : (wd.verified ? COLORS.verified : COLORS.auto);
+    ctx.strokeStyle = wd === S.sel ? COLORS.sel : col;
+    ctx.lineWidth = wd === S.sel ? 2.5 : (wd.ignored ? 1 : 1.6);
+    ctx.setLineDash(wd.ignored ? [4, 4] : []);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.setLineDash([]);
+    if (wd.verified && !wd.ignored) { ctx.fillStyle = "rgba(22,163,74,.10)"; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y); }
+    if (wd === S.sel) { ctx.fillStyle = "rgba(245,158,11,.12)"; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y); }
+    if (S.showLabels && V.s >= 1.4 && wd.label) {
+      ctx.fillStyle = col; ctx.font = `${Math.min(13, Math.max(9, 11 * V.s / 3))}px sans-serif`;
+      ctx.textAlign = "right"; ctx.direction = "rtl";
+      ctx.fillText(wd.label, b.x, a.y - 3);
+    }
+  }
+  // مقابض المربع المحدد
+  if (S.sel) drawHandles(S.sel, V);
+  // مستطيل الإضافة الجاري
+  if (S.drag && S.drag.type === "add") {
+    const r = S.drag.rect, a = toScreen(r.x1, r.y1, V), b = toScreen(r.x2, r.y2, V);
+    ctx.strokeStyle = COLORS.add; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.setLineDash([]);
+  }
+}
+function handlePts(wd) {
+  const xs = [wd.x1, (wd.x1 + wd.x2) / 2, wd.x2];
+  const ys = [wd.y1, (wd.y1 + wd.y2) / 2, wd.y2];
+  const P = [];
+  ys.forEach((y, iy) => xs.forEach((x, ix) => { if (ix !== 1 || iy !== 1) P.push({x, y, ix, iy}); }));
+  return P;
+}
+function drawHandles(wd, V) {
+  const size = Math.max(4, Math.min(7, 5 * V.s));
+  ctx.fillStyle = COLORS.sel;
+  handlePts(wd).forEach(p => {
+    const a = toScreen(p.x, p.y, V);
+    ctx.fillRect(a.x - size, a.y - size, size * 2, size * 2);
+  });
+}
+
+/* ───────── التفاعل بالمؤشر ───────── */
+function hitHandle(px, py, V) {
+  if (!S.sel) return null;
+  const tol = 13 / V.s;
+  for (const p of handlePts(S.sel)) {
+    if (Math.abs(px - p.x) <= tol && Math.abs(py - p.y) <= tol) return p;
+  }
+  return null;
+}
+function hitWord(px, py) {
+  const cands = activeWords().filter(wd => px >= wd.x1 && px <= wd.x2 && py >= wd.y1 && py <= wd.y2);
+  if (!cands.length) return null;
+  cands.sort((a, b) => (a.x2 - a.x1) * (a.y2 - a.y1) - (b.x2 - b.x1) * (b.y2 - b.y1));
+  return cands[0];
+}
+function hitLine(px, py) {
+  for (let i = 0; i < S.data.lines.length; i++) {
+    const l = S.data.lines[i];
+    if (px >= l.x1 - 5 && px <= l.x2 + 5 && py >= l.y1 - 5 && py <= l.y2 + 5) return i;
+  }
+  return -1;
+}
+function cvPos(ev) {
+  const r = cv.getBoundingClientRect();
+  return toPage(ev.clientX - r.left, ev.clientY - r.top, viewFor());
+}
+cv.addEventListener("pointerdown", ev => {
+  if (!S.data) return;
+  cv.setPointerCapture(ev.pointerId);
+  const p = cvPos(ev);
+  if (S.addMode) {
+    S.drag = {type: "add", rect: {x1: p.x, y1: p.y, x2: p.x, y2: p.y}};
+    return;
+  }
+  const hd = hitHandle(p.x, p.y, viewFor());
+  if (hd) {
+    S.drag = {type: "resize", h: hd, orig: {...S.sel}};
+    return;
+  }
+  const wd = hitWord(p.x, p.y);
+  if (wd) {
+    S.sel = wd;
+    if (S.mode === "page") S.lineIdx = wd.line;
+    S.freeView = null;
+    syncSelBar(); syncLinePos(); draw();
+    S.drag = {type: "move", dx: p.x - wd.x1, dy: p.y - wd.y1};
+    return;
+  }
+  if (S.mode === "zoom") {
+    const V = viewFor();
+    S.drag = {type: "pan", start: p, o0: {ox: V.ox, oy: V.oy}};
+    return;
+  }
+  if (S.mode === "page") {
+    const li = hitLine(p.x, p.y);
+    if (li >= 0) { S.lineIdx = li; syncLinePos(); }
+  }
+  S.sel = null; syncSelBar(); draw();
+});
+cv.addEventListener("pointermove", ev => {
+  if (!S.data || !S.drag) return;
+  const p = cvPos(ev), W = S.data.width, H = S.data.height;
+  if (S.drag.type === "resize") {
+    const w = S.sel, o = S.drag.orig, h = S.drag.h;
+    if (h.ix === 0) w.x1 = clamp(p.x, 0, Math.min(o.x2 - 4, W)); else if (h.ix === 2) w.x2 = clamp(p.x, Math.max(o.x1 + 4, 0), W);
+    if (h.iy === 0) w.y1 = clamp(p.y, 0, Math.min(o.y2 - 4, H)); else if (h.iy === 2) w.y2 = clamp(p.y, Math.max(o.y1 + 4, 0), H);
+    markDirty(w); draw();
+  } else if (S.drag.type === "move") {
+    const w = S.sel, bw = w.x2 - w.x1, bh = w.y2 - w.y1;
+    w.x1 = clamp(p.x - S.drag.dx, 0, W - bw); w.y1 = clamp(p.y - S.drag.dy, 0, H - bh);
+    w.x2 = w.x1 + bw; w.y2 = w.y1 + bh;
+    markDirty(w); draw();
+  } else if (S.drag.type === "add") {
+    const r = S.drag.rect;
+    r.x2 = clamp(p.x, 0, W); r.y2 = clamp(p.y, 0, H);
+    draw();
+  } else if (S.drag.type === "pan") {
+    S.freeView = {ox: clamp(S.drag.o0.ox - (p.x - S.drag.start.x), 0, Math.max(0, W - cv.clientWidth / S.zoom)),
+                  oy: clamp(S.drag.o0.oy - (p.y - S.drag.start.y), 0, Math.max(0, H - cv.clientHeight / S.zoom))};
+    draw();
+  }
+});
+cv.addEventListener("pointerup", ev => {
+  if (!S.data || !S.drag) return;
+  const d = S.drag; S.drag = null;
+  if (d.type === "add") {
+    const r = d.rect;
+    r.x1 = Math.round(Math.min(r.x1, r.x2)); r.x2 = Math.round(Math.max(r.x1, d.rect.x2));
+    r.y1 = Math.round(Math.min(r.y1, r.y2)); r.y2 = Math.round(Math.max(r.y1, d.rect.y2));
+    if (r.x2 - r.x1 < 4 || r.y2 - r.y1 < 4) { S.addMode = false; $("addBtn").classList.remove("on"); draw(); return; }
+    jpost("/api/add", {page_name: S.data.name, x1: r.x1, y1: r.y1, x2: r.x2, y2: r.y2, language: "arabic"})
+      .then(j => {
+        const w = j.word; w.line = lineOf(w);
+        S.data.words.push(w);
+        S.sel = w; S.addMode = false; $("addBtn").classList.remove("on");
+        syncSelBar(); $("labelIn").focus(); status("✓ أُضيف مربع — اكتب الوسم");
+        draw();
+      })
+      .catch(e => status("✗ " + e.message, true));
+    return;
+  }
+  if (d.type === "resize" || d.type === "move") {
+    S.sel.x1 = Math.round(S.sel.x1); S.sel.y1 = Math.round(S.sel.y1);
+    S.sel.x2 = Math.round(S.sel.x2); S.sel.y2 = Math.round(S.sel.y2);
+    syncSelBar(); draw();
+  }
+});
+
+/* ───────── الحفظ ───────── */
+let saveTimer = null;
+function markDirty(w) {
+  S.dirty.add(w.id);
+  status("… تعديلات غير محفوظة");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveDirty, 900);
+}
+async function saveDirty() {
+  if (!S.dirty.size || S.saving || !S.data) return;
+  S.saving = true;
+  const items = [...S.dirty].map(id => wordById(id)).filter(Boolean)
+    .map(w => ({id: w.id, x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2,
+                label: w.label, verified: w.verified, ignored: w.ignored,
+                language: w.language}));
+  try {
+    await jpost("/api/update", {items});
+    S.dirty.clear();
+    status("✓ محفوظ");
+    refreshPages();
+  } catch (e) {
+    status("✗ فشل الحفظ: " + e.message, true);
+  }
+  S.saving = false;
+}
+
+/* ───────── أدوات المربع ───────── */
+function nudge(dx1, dy1, dx2, dy2) {
+  if (!S.sel) return;
+  const w = S.sel, W = S.data.width, H = S.data.height;
+  w.x1 = clamp(w.x1 + dx1, 0, w.x2 - 4);
+  w.y1 = clamp(w.y1 + dy1, 0, w.y2 - 4);
+  w.x2 = clamp(w.x2 + dx2, w.x1 + 4, W);
+  w.y2 = clamp(w.y2 + dy2, w.y1 + 4, H);
+  markDirty(w); syncSelBar(); draw();
+}
+$("wider").onclick = () => nudge(-5, 0, 5, 0);
+$("narrower").onclick = () => nudge(5, 0, -5, 0);
+$("growL").onclick = () => nudge(0, 0, 5, 0);
+$("shrinkL").onclick = () => nudge(0, 0, -5, 0);
+$("growR").onclick = () => nudge(-5, 0, 0, 0);
+$("shrinkR").onclick = () => nudge(5, 0, 0, 0);
+$("delBtn").onclick = () => {
+  if (!S.sel) return;
+  const w = S.sel;
+  jpost("/api/delete", {ids: [w.id]}).then(() => {
+    w.ignored = true; S.dirty.delete(w.id);
+    log("تجاهل", w.id); S.sel = null; syncSelBar(); draw(); refreshPages();
+  }).catch(e => status("✗ " + e.message, true));
+};
+$("splitBtn").onclick = () => {
+  if (!S.sel) return;
+  const w = S.sel;
+  const mid = Math.round((w.x1 + w.x2) / 2);
+  if (mid - w.x1 < 4 || w.x2 - mid < 4) { status("✗ المربع ضيق للقسمة", true); return; }
+  const right = {x1: mid + 1, y1: w.y1, x2: w.x2, y2: w.y2};
+  w.x2 = mid;
+  markDirty(w);
+  jpost("/api/add", {page_name: S.data.name, ...right, language: w.language})
+    .then(j => {
+      const nw = j.word; nw.line = w.line;
+      S.data.words.push(nw);
+      log("تقسيم", w.id, nw.id);
+      S.sel = nw; syncSelBar(); draw();
+    })
+    .catch(e => { w.x2 = right.x2; status("✗ " + e.message, true); draw(); });
+};
+function neighborOf(w) {
+  const act = activeWords().filter(x => x !== w);
+  if (!act.length) return null;
+  const sameLine = act.filter(x => x.line === w.line);
+  const pool = sameLine.length ? sameLine : act;
+  pool.sort((a, b) => Math.abs((a.x1 + a.x2) / 2 - (w.x1 + w.x2) / 2));
+  return pool[0];
+}
+$("mergeBtn").onclick = () => {
+  if (!S.sel) return;
+  const w = S.sel, nb = neighborOf(w);
+  if (!nb) return;
+  jpost("/api/merge", {keep_id: w.id, drop_id: nb.id}).then(() => {
+    w.x1 = Math.min(w.x1, nb.x1); w.y1 = Math.min(w.y1, nb.y1);
+    w.x2 = Math.max(w.x2, nb.x2); w.y2 = Math.max(w.y2, nb.y2);
+    if (!w.label && nb.label) w.label = nb.label;
+    nb.ignored = true;
+    S.dirty.delete(w.id); S.dirty.delete(nb.id);
+    log("دمج", nb.id, "→", w.id);
+    S.sel = w; syncSelBar(); draw(); refreshPages();
+  }).catch(e => status("✗ " + e.message, true));
+};
+$("regenBtn").onclick = () => {
+  if (!S.sel) return;
+  const w = S.sel;
+  markDirty(w);
+  status("… سيُعاد قص الصورة مع الحفظ");
+};
+function log(...a) { console.log("تعديل:", ...a); }
+
+/* ───────── شريط التحديد ───────── */
+$("labelIn").addEventListener("input", () => {
+  if (!S.sel) return;
+  S.sel.label = $("labelIn").value;
+  markDirty(S.sel);
+});
+$("labelIn").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") { confirmAndNext(); ev.preventDefault(); }
+});
+$("langSel").addEventListener("change", () => {
+  if (!S.sel) return;
+  S.sel.language = $("langSel").value;
+  markDirty(S.sel);
+});
+$("verChk").addEventListener("change", () => {
+  if (!S.sel) return;
+  S.sel.verified = $("verChk").checked;
+  markDirty(S.sel); draw(); refreshPages();
+  if (S.sel.verified) status("✓ مؤكد");
+});
+$("ignChk").addEventListener("change", () => {
+  if (!S.sel) return;
+  const w = S.sel, want = $("ignChk").checked;
+  const req = want ? jpost("/api/delete", {ids: [w.id]}) : Promise.resolve();
+  req.then(() => {
+    w.ignored = want;
+    if (!want) markDirty(w);
+    syncSelBar(); draw(); refreshPages();
+  }).catch(e => status("✗ " + e.message, true));
+});
+function confirmAndNext() {
+  if (!S.sel) return;
+  const w = S.sel;
+  w.verified = true;
+  markDirty(w);
+  const act = activeWords().filter(x => x.line === w.line && !x.verified);
+  act.sort((a, b) => a.x1 - b.x1);
+  const nxt = act[0];
+  S.sel = nxt || null;
+  if (nxt && S.mode === "page") S.lineIdx = nxt.line;
+  if (S.mode !== "page") S.zoom = Math.max(S.zoom, 3);
+  syncSelBar(); draw();
+  if (!nxt) status("✓ اكتمل السطر — انتقل للسطر التالي");
+  else $("labelIn").focus();
+}
+
+/* ───────── التنقل ───────── */
+function pageList() {
+  return S.filter === "todo" ? S.pages.filter(p => p.words - p.ignored > p.verified) : S.pages;
+}
+async function gotoPage(delta) {
+  const list = pageList();
+  const i = list.findIndex(p => p.name === (S.data && S.data.name));
+  const ni = clamp((i < 0 ? 0 : i) + delta, 0, list.length - 1);
+  if (list[ni] && (!S.data || list[ni].name !== S.data.name)) {
+    await saveDirty();
+    $("pageSel").value = list[ni].name;
+    await loadPage(list[ni].name);
+  }
+  $("pagePos").textContent = list.length ? `صفحة ${ni + 1}/${list.length}` : "";
+}
+$("prevPage").onclick = () => gotoPage(1);   // RTL: السابقة جهة اليمين
+$("nextPage").onclick = () => gotoPage(-1);
+$("pageSel").addEventListener("change", async () => {
+  await saveDirty();
+  await loadPage($("pageSel").value);
+});
+$("filterSel").addEventListener("change", () => {
+  S.filter = $("filterSel").value;
+  fillPages();
+  $("pagePos").textContent = "";
+});
+function gotoLine(delta) {
+  if (!S.data) return;
+  S.lineIdx = clamp(S.lineIdx + delta, 0, S.data.lines.length - 1);
+  S.freeView = null;
+  syncLinePos(); draw();
+}
+$("prevLine").onclick = () => gotoLine(1);
+$("nextLine").onclick = () => gotoLine(-1);
+
+/* ───────── أوضاع العرض ───────── */
+function setMode(m) {
+  S.mode = m; S.freeView = null;
+  ["mPage", "mLine", "mZoom"].forEach(id => $(id).classList.remove("on"));
+  $({page: "mPage", line: "mLine", zoom: "mZoom"}[m]).classList.add("on");
+  if (m !== "page" && S.sel) S.lineIdx = S.sel.line;
+  syncLinePos(); draw();
+}
+$("mPage").onclick = () => setMode("page");
+$("mLine").onclick = () => setMode("line");
+$("mZoom").onclick = () => setMode("zoom");
+$("zoomR").addEventListener("input", () => {
+  S.zoom = parseFloat($("zoomR").value);
+  if (S.mode === "zoom") { S.freeView = null; draw(); }
+});
+$("showLines").addEventListener("change", () => { S.showLines = $("showLines").checked; draw(); });
+$("showLabels").addEventListener("change", () => { S.showLabels = $("showLabels").checked; draw(); });
+$("addBtn").onclick = () => {
+  S.addMode = !S.addMode;
+  $("addBtn").classList.toggle("on", S.addMode);
+  if (S.addMode) status("ارسم مستطيلًا حول الكلمة الجديدة");
+  else draw();
+};
+$("saveBtn").onclick = () => saveDirty();
+$("helpBtn").onclick = () => { $("helpBox").hidden = !$("helpBox").hidden; };
+
+/* ───────── لوحة المفاتيح ───────── */
+document.addEventListener("keydown", ev => {
+  if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") {
+    if (ev.key === "Escape") ev.target.blur();
+    return;
+  }
+  if (!S.data) return;
+  const st = ev.shiftKey ? 10 : 1;
+  switch (ev.key) {
+    case "ArrowLeft": nudge(-st, 0, -st, 0); ev.preventDefault(); break;   // RTL: يسار = تحريك
+    case "ArrowRight": nudge(st, 0, st, 0); ev.preventDefault(); break;
+    case "ArrowUp": nudge(0, -st, 0, -st); ev.preventDefault(); break;
+    case "ArrowDown": nudge(0, st, 0, st); ev.preventDefault(); break;
+    case "[": nudge(-5, 0, -5, 0); ev.preventDefault(); break;
+    case "]": nudge(5, 0, 5, 0); ev.preventDefault(); break;
+    case "Delete": case "Backspace": $("delBtn").onclick(); ev.preventDefault(); break;
+    case "Escape": S.sel = null; syncSelBar(); draw(); break;
+    case "s": case "S": saveDirty(); break;
+    case "Tab": {
+      const act = activeWords().filter(x => S.sel && x.line === S.sel.line && !x.ignored);
+      act.sort((a, b) => a.x1 - b.x1);
+      const i = act.indexOf(S.sel);
+      const nx = act[(i + 1) % act.length];
+      if (nx) { S.sel = nx; syncSelBar(); draw(); }
+      ev.preventDefault();
+      break;
+    }
+  }
+});
+
+/* ───────── الإقلاع ───────── */
+window.addEventListener("resize", draw);
+// إعادة رسم عند أي تغيّر في حجم مساحة العرض (يثبت التوسيط بعد اكتمال التخطيط)
+new ResizeObserver(() => draw()).observe(document.querySelector("main"));
+(async () => {
+  try {
+    await loadPages();
+    const list = pageList();
+    if (list.length) {
+      $("pagePos").textContent = `صفحة 1/${list.length}`;
+      await loadPage(list[0].name);
+    } else {
+      status("لا صفحات — شغّل خطوات الاستيراد أولًا", true);
+    }
+  } catch (e) {
+    status("✗ " + e.message, true);
+  }
+})();
+</script>
+</body>
+</html>

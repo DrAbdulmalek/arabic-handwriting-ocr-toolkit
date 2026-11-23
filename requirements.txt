@@ -1,0 +1,12 @@
+# متطلبات حزمة OCR الخط اليدوي العربي
+# التثبيت:  pip install -r requirements.txt
+# ملاحظة: ميزة HF Buckets حديثة — شغّل  pip install -U huggingface_hub  قبل الخطوة 1
+huggingface_hub>=0.30
+transformers>=4.46
+datasets>=2.20
+accelerate>=0.30
+jiwer>=3.0
+pillow>=10.0
+pandas>=2.0
+gradio>=4.44,<6.0
+PyMuPDF>=1.24
