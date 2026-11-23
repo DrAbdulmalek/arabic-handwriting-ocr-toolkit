@@ -118,13 +118,15 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
   </div>
   <div id="helpBox" hidden>
     <b>الطريقة:</b> انقر مربعًا لتحديده، ثم اسحب حوافه أو زواياه لتوسيعه/تضييقه (أسحب داخل المربع لتحريكه).
+    <b>انقر أي فراغ فوق كلمة بلا مربع → يتشكّل المربع تلقائيًا حول حبرها</b> فيكفيك ضبط بسيط للحواف ووسم الكلمة.
     إن كان المربع لا يشمل الكلمة كاملة → مدّد الحافة؛ إن ضمّ كلمتين → <b>✂ تقسيم</b> ثم اضبط النصفين؛
     إن قُسّمت كلمة على مربعين → <b>دمج مع الجار</b>. حرّك الأسهم للتنقل بين الأسطر في عرض «سطر/جزء مكبّر»،
-    وانقر <b>➕ مربع جديد</b> ثم ارسم مستطيلًا لكلمة لم يلتقطها التقسيم الآلي.
+    وانقر <b>➕ مربع جديد</b> ثم ارسم مستطيلًا لكلمة لم يلتقطها الاكتشاف التلقائي.
     <b>الحفظ تلقائي</b> بعد ثانية من كل تعديل، وكل تغيير يُسجَّل في سجل تدقيق، وصورة القصاصة تُعاد تلقائيًا بالحدود الجديدة.
     <b>اختصارات:</b> Enter = تأكيد الوسم والانتقال للكلمة التالية · الأسهم = تحريك المربع (مع Shift أسرع) ·
+    <b>Ctrl+الأسهم = تغيير الحجم</b> (يمين/يسار = عرضًا، أعلى/أسفل = طولًا) ·
     <b>[ ]</b> = توسيع/تضييق ±5px · Delete = تجاهل · Esc = إلغاء التحديد · s = حفظ · Tab = الكلمة التالية في السطر.
-    في العرض المكبّر اسحب الفراغ لتحريك العرض.
+    في العرض المكبّر اسحب الفراغ لتحريك العرض، ونقرة بلا سحب تكشف الكلمة.
   </div>
 </aside>
 
@@ -395,14 +397,16 @@ cv.addEventListener("pointerdown", ev => {
   }
   if (S.mode === "zoom") {
     const V = viewFor();
-    S.drag = {type: "pan", start: p, o0: {ox: V.ox, oy: V.oy}};
+    S.drag = {type: "pan", start: p, o0: {ox: V.ox, oy: V.oy}, moved: false};
     return;
   }
   if (S.mode === "page") {
     const li = hitLine(p.x, p.y);
     if (li >= 0) { S.lineIdx = li; syncLinePos(); }
   }
+  // نقر على فراغ: يشكّل المربع تلقائيًا حول حبر الكلمة المُنقورة
   S.sel = null; syncSelBar(); draw();
+  autoDetect(p);
 });
 cv.addEventListener("pointermove", ev => {
   if (!S.data || !S.drag) return;
@@ -422,6 +426,7 @@ cv.addEventListener("pointermove", ev => {
     r.x2 = clamp(p.x, 0, W); r.y2 = clamp(p.y, 0, H);
     draw();
   } else if (S.drag.type === "pan") {
+    if (!S.drag.moved && Math.hypot(p.x - S.drag.start.x, p.y - S.drag.start.y) > 3) S.drag.moved = true;
     S.freeView = {ox: clamp(S.drag.o0.ox - (p.x - S.drag.start.x), 0, Math.max(0, W - cv.clientWidth / S.zoom)),
                   oy: clamp(S.drag.o0.oy - (p.y - S.drag.start.y), 0, Math.max(0, H - cv.clientHeight / S.zoom))};
     draw();
@@ -446,12 +451,39 @@ cv.addEventListener("pointerup", ev => {
       .catch(e => status("✗ " + e.message, true));
     return;
   }
+  if (d.type === "pan") {
+    if (!d.moved) autoDetect(d.start);   // نقرة بلا سحب في العرض المكبّر = اكتشاف
+    return;
+  }
   if (d.type === "resize" || d.type === "move") {
     S.sel.x1 = Math.round(S.sel.x1); S.sel.y1 = Math.round(S.sel.y1);
     S.sel.x2 = Math.round(S.sel.x2); S.sel.y2 = Math.round(S.sel.y2);
     syncSelBar(); draw();
   }
 });
+
+/* ───────── اكتشاف الكلمة تلقائيًا من نقطة النقر ───────── */
+async function autoDetect(p) {
+  if (!S.data) return;
+  status("… اكتشاف الكلمة حول النقرة");
+  try {
+    let url = `/api/auto_box?name=${encodeURIComponent(S.data.name)}&x=${Math.round(p.x)}&y=${Math.round(p.y)}`;
+    const li = hitLine(p.x, p.y);
+    if (li >= 0) { const l = S.data.lines[li]; url += `&ly1=${l.y1}&ly2=${l.y2}`; }
+    const j = await jget(url);
+    if (!j.found) { status("لا حبر قريبًا من النقرة — انقر داخل الكلمة نفسها"); draw(); return; }
+    const j2 = await jpost("/api/add", {page_name: S.data.name, x1: j.x1, y1: j.y1,
+                                        x2: j.x2, y2: j.y2, language: "arabic"});
+    const w = j2.word; w.line = lineOf(w);
+    S.data.words.push(w);
+    S.sel = w;
+    if (S.mode === "page") S.lineIdx = w.line;
+    S.freeView = null;
+    syncSelBar(); syncLinePos(); draw();
+    $("labelIn").focus();
+    status("✨ مُشكّل تلقائيًا — اضبط الحواف إن لزم واكتب الوسم");
+  } catch (e) { status("✗ اكتشاف: " + e.message, true); }
+}
 
 /* ───────── الحفظ ───────── */
 let saveTimer = null;
@@ -666,10 +698,10 @@ document.addEventListener("keydown", ev => {
   if (!S.data) return;
   const st = ev.shiftKey ? 10 : 1;
   switch (ev.key) {
-    case "ArrowLeft": nudge(-st, 0, -st, 0); ev.preventDefault(); break;   // RTL: يسار = تحريك
-    case "ArrowRight": nudge(st, 0, st, 0); ev.preventDefault(); break;
-    case "ArrowUp": nudge(0, -st, 0, -st); ev.preventDefault(); break;
-    case "ArrowDown": nudge(0, st, 0, st); ev.preventDefault(); break;
+    case "ArrowLeft":  ev.ctrlKey || ev.metaKey ? nudge(0, 0, -st, 0) : nudge(-st, 0, -st, 0); ev.preventDefault(); break;   // RTL: يسار = تحريك
+    case "ArrowRight": ev.ctrlKey || ev.metaKey ? nudge(0, 0,  st, 0) : nudge( st, 0,  st, 0); ev.preventDefault(); break;
+    case "ArrowUp":    ev.ctrlKey || ev.metaKey ? nudge(0, 0, 0, -st) : nudge(0, -st, 0, -st); ev.preventDefault(); break;
+    case "ArrowDown":  ev.ctrlKey || ev.metaKey ? nudge(0, 0, 0,  st) : nudge(0,  st, 0,  st); ev.preventDefault(); break;
     case "[": nudge(-5, 0, -5, 0); ev.preventDefault(); break;
     case "]": nudge(5, 0, 5, 0); ev.preventDefault(); break;
     case "Delete": case "Backspace": $("delBtn").onclick(); ev.preventDefault(); break;
@@ -688,6 +720,7 @@ document.addEventListener("keydown", ev => {
 });
 
 /* ───────── الإقلاع ───────── */
+window.BE = S;   // خُطّاف للتصحيح والاختبار الآلي: حالة المحرر كاملة من الكونسول
 window.addEventListener("resize", draw);
 // إعادة رسم عند أي تغيّر في حجم مساحة العرض (يثبت التوسيط بعد اكتمال التخطيط)
 new ResizeObserver(() => draw()).observe(document.querySelector("main"));

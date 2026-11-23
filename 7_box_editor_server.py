@@ -16,6 +16,7 @@
 نقاط النهاية:
   GET  /api/pages    قائمة الصفحات + عدّادات المراجعة
   GET  /api/page     تفاصيل صفحة: الأسطر + الكلمات + الإحداثيات
+  GET  /api/auto_box اكتشاف حدود كلمة تلقائيًا من نقطة نقر (حبر المكوّنات حول النقرة)
   GET  /img/page     صورة الصفحة كاملة
   GET  /img/crop     قص أي منطقة من الصفحة (عرض السطر/الجزء المكبّر)
   POST /api/update   تحديث مربعات/وسوم/حالات دفعة واحدة
@@ -132,6 +133,190 @@ def crop_png_bytes(name, x1, y1, x2, y2, scale=1):
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()
+
+
+# ─────────────────────── اكتشاف حدود كلمة من نقطة نقر ───────────────────────
+_gray_cache = {}
+
+
+def page_gray(name):
+    with _img_cache_lock:
+        if name in _gray_cache:
+            return _gray_cache[name]
+    g = page_image(name).convert("L")
+    with _img_cache_lock:
+        if len(_gray_cache) > 7:
+            _gray_cache.pop(next(iter(_gray_cache)))
+        _gray_cache[name] = g
+    return g
+
+
+def _otsu(hist):
+    """عتبة Otsu من مدرج تكراري 256 خانة — فصل الحبر عن الخلفية تلقائيًا."""
+    total = sum(hist)
+    if not total:
+        return 128
+    sum_all = sum(i * hist[i] for i in range(256))
+    sum_b = w_b = 0
+    best_t, best_var = 128, -1.0
+    for t in range(256):
+        w_b += hist[t]
+        if not w_b:
+            continue
+        w_f = total - w_b
+        if not w_f:
+            break
+        sum_b += t * hist[t]
+        m_b = sum_b / w_b
+        m_f = (sum_all - sum_b) / w_f
+        var = w_b * w_f * (m_b - m_f) * (m_b - m_f)
+        if var > best_var:
+            best_var, best_t = var, t
+    return best_t
+
+
+def auto_word_box(name, x, y, band=None, gap=12, vreach=20, _win=None):
+    """يرصد حدود الكلمة الحبرية حول نقطة النقر (x, y) على الصفحة name.
+
+    يقتص نافذة حول النقرة، يعتبها بـ Otsu، يرقّم مكوّنات الحبر المتصلة،
+    يبدأ من المكوّن عند النقرة أو الأقرب إليها (يتحمل النقر داخل ثقب حرف
+    مثل ـحـ أو ـمـ)، ثم يدمج تكراريًا كل مكوّن قريب: بفجوة أفقية ≤ gap
+    ومسافة عمودية ≤ vreach — فتلتحم ضربات الحرف مع نقطه وشدة، ويمنع
+    النطاق band=(y1, y2) لسطر الصفحة امتداد الدمج إلى السطر المجاور.
+    إن لامس المربع حافة النافذة أعاد المحاولة بمحل أوسع (_win).
+    يعيد مربعًا بإحداثيات الصفحة الأصلية، أو found=False إن لم يوجد حبر.
+    """
+    img = page_gray(name)
+    W, H = img.size
+    x = max(0, min(int(x), W - 1))
+    y = max(0, min(int(y), H - 1))
+    if _win is not None:
+        wx1, wy1, wx2, wy2 = _win
+    else:
+        hw, hh = 200, 150
+        wx1, wy1 = max(0, x - hw), max(0, y - hh)
+        wx2, wy2 = min(W, x + hw), min(H, y + hh)
+    if wx2 - wx1 < 10 or wy2 - wy1 < 10:
+        return {"found": False}
+    win = img.crop((wx1, wy1, wx2, wy2))
+    wlen, wht = win.size
+    px = list(win.getdata())
+    hist = [0] * 256
+    for v in px:
+        hist[v] += 1
+    thr = _otsu(hist)
+    if thr < 1:
+        # صورة ثنائية القيمة الصارمة (0/255): Otsu يعيد 0 — الحبر هو القيمة الداكنة
+        thr = 1
+    ink = [v < thr for v in px]
+
+    def ink_at(i, j):
+        return ink[j * wlen + i]
+
+    lx, ly = x - wx1, y - wy1
+    # بذرة المكوّن: النقرة نفسها إن وقعت على حبر، وإلا أقرب حبر ضمن 40 بكسل
+    seed = None
+    if 0 <= lx < wlen and 0 <= ly < wht and ink_at(lx, ly):
+        seed = (lx, ly)
+    else:
+        for r in range(1, 41):
+            hit = None
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    if max(abs(dx), abs(dy)) != r:
+                        continue
+                    i, j = lx + dx, ly + dy
+                    if 0 <= i < wlen and 0 <= j < wht and ink_at(i, j):
+                        hit = (i, j)
+                        break
+                if hit:
+                    break
+            if hit:
+                seed = hit
+                break
+    if not seed:
+        return {"found": False}
+
+    # ترقيم مكوّنات الحبر في النافذة (BFS) مع مربع كل مكوّن
+    label = [[0] * wlen for _ in range(wht)]
+    boxes = [None]                 # boxes[k] = [x1, y1, x2, y2] بالمكوّن k (من 1)
+    nlab = 0
+    stack = []
+    for j0 in range(wht):
+        row0 = label[j0]
+        for i0 in range(wlen):
+            if row0[i0] or not ink[j0 * wlen + i0]:
+                continue
+            nlab += 1
+            b = [i0, j0, i0, j0]
+            boxes.append(b)
+            stack.append((i0, j0))
+            row0[i0] = nlab
+            while stack:
+                ci, cj = stack.pop()
+                if ci < b[0]: b[0] = ci
+                elif ci > b[2]: b[2] = ci
+                if cj < b[1]: b[1] = cj
+                elif cj > b[3]: b[3] = cj
+                for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ni, nj = ci + di, cj + dj
+                    if 0 <= ni < wlen and 0 <= nj < wht:
+                        rl = label[nj]
+                        if not rl[ni] and ink[nj * wlen + ni]:
+                            rl[ni] = nlab
+                            stack.append((ni, nj))
+    seed_lab = label[seed[1]][seed[0]]
+    if not seed_lab:
+        return {"found": False}
+
+    cur = list(boxes[seed_lab])
+    # دمج تكراري حتى الاستقرار: الفجوة الأفقية والوصول العمودي يحدان الكلمة
+    changed = True
+    while changed:
+        changed = False
+        for k in range(1, nlab + 1):
+            if k == seed_lab:
+                continue
+            b = boxes[k]
+            if b is None:
+                continue
+            if max(cur[0] - b[2], b[0] - cur[2], 0) > gap:
+                continue
+            if max(cur[1] - b[3], b[1] - cur[3], 0) > vreach:
+                continue
+            if band is not None:
+                bc = (b[1] + b[3]) / 2
+                if bc < band[0] - wy1 - vreach or bc > band[1] - wy1 + vreach:
+                    continue
+            cur = [min(cur[0], b[0]), min(cur[1], b[1]),
+                   max(cur[2], b[2]), max(cur[3], b[3])]
+            boxes[k] = None
+            changed = True
+
+    # إن لامس المربع حافة النافذة فقد تكون الكلمة مقصوصة — أعد بمحل أوسع مرة واحدة
+    if _win is None and (cur[0] <= 1 or cur[1] <= 1
+                         or cur[2] >= wlen - 2 or cur[3] >= wht - 2):
+        bx1, by1 = wx1 + cur[0], wy1 + cur[1]
+        bx2, by2 = wx1 + cur[2], wy1 + cur[3]
+        ex1 = min(wx1, max(0, bx1 - 80))
+        ey1 = min(wy1, max(0, by1 - 80))
+        ex2 = max(wx2, min(W, bx2 + 80))
+        ey2 = max(wy2, min(H, by2 + 80))
+        if (ex2 - ex1) > (wx2 - wx1) or (ey2 - ey1) > (wy2 - wy1):
+            bigger = auto_word_box(name, x, y, band=band, gap=gap,
+                                   vreach=vreach, _win=(ex1, ey1, ex2, ey2))
+            if bigger.get("found"):
+                return bigger
+
+    pad = 2
+    x1 = max(0, wx1 + cur[0] - pad)
+    y1 = max(0, wy1 + cur[1] - pad)
+    x2 = min(W, wx1 + cur[2] + 1 + pad)
+    y2 = min(H, wy1 + cur[3] + 1 + pad)
+    if x2 - x1 < 5 or y2 - y1 < 5:
+        return {"found": False}
+    return {"found": True, "x1": int(x1), "y1": int(y1),
+            "x2": int(x2), "y2": int(y2)}
 
 
 # ─────────────────────────── عمليات البيانات ───────────────────────────
@@ -347,6 +532,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api_pages())
             if u.path == "/api/page":
                 return self._json(api_page(q["name"][0]))
+            if u.path == "/api/auto_box":
+                name = q["name"][0]
+                if name not in PAGE_MAP:
+                    return self._json({"error": "صفحة غير موجودة"}, 404)
+                bx, by = float(q["x"][0]), float(q["y"][0])
+                band = None
+                if "ly1" in q and "ly2" in q:
+                    band = (float(q["ly1"][0]), float(q["ly2"][0]))
+                gap = float(q.get("gap", ["12"])[0])
+                vreach = float(q.get("vreach", ["20"])[0])
+                return self._json(auto_word_box(name, bx, by, band=band,
+                                                gap=gap, vreach=vreach))
             if u.path == "/img/page":
                 name = q["name"][0]
                 if name not in PAGE_MAP:
