@@ -26,6 +26,7 @@
   POST /api/update   تحديث مربعات/وسوم/حالات دفعة واحدة
   POST /api/add      إضافة مربع جديد
   POST /api/add_many إضافة دفعة مربعات (نتيجة التحليل الآلي)
+  POST /api/tighten تقليص المربعات إلى حدود الحبر تمامًا (نمط ABBYY) وإعادة قصها
   POST /api/delete   تجاهل مربعات (تبقى في القاعدة معلّمة ignored=1)
   POST /api/merge    دمج مربعين في واحد
   POST /api/consent  تسجيل إذن/رفض المستخدم للإرسال
@@ -62,7 +63,7 @@ PANEL_PATH = TOOLKIT / "control_panel.html"
 ADJ_LOG = TOOLKIT / "ocr_data/box_adjustments.jsonl"
 APP_LOG = TOOLKIT / "ocr_data/app_log.jsonl"      # سجل النشاط العام
 TELEMETRY = TOOLKIT / "ocr_data/telemetry.json"   # إذن إرسال البيانات للمطوّر
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 _db_lock = threading.RLock()  # قابل لإعادة الدخول: log_adj يُستدعى داخل الحاملين للقفل
 _img_cache = {}
@@ -345,7 +346,8 @@ def _band_rows(ink, wlen, wht, near_y, reach=18):
 
 
 def auto_word_box(name, x, y, band=None, gap=5, vreach=18):
-    """مربع ضيق حول الكلمة المُنقورة فقط — بلا جيرانها.
+    """مربع ضيق حول الكلمة المُنقورة فقط — ملاصق لحبرها بلا أي هامش أبيض
+    (نمط حفظ الـpatterns في ABBYY FineReader) — بلا جيرانها.
 
     يقسّم شريط السطر حول النقرة إلى كلمات بفجوات الأعمدة الحبرية
     (البروفيل العمودي)، ويختار الشريحة التي تحتوي عمود النقرة (أو الأقرب
@@ -391,10 +393,11 @@ def auto_word_box(name, x, y, band=None, gap=5, vreach=18):
         ye = _y_extent(ink, wlen, wht, seg[0], seg[1], ry1, ry2)
         # النقرة قريبة عموديًا من الشريحة؟ (يمنع التقاط كلمة بعيدة أسفل/أعلى)
         if ye and ye[0] - 40 <= ly <= ye[1] + 40:
-            bx1 = max(0, wx1 + seg[0] - 2)
-            by1 = max(0, wy1 + ye[0] - 2)
-            bx2 = min(W, wx1 + seg[1] + 2)
-            by2 = min(H, wy1 + ye[1] + 2)
+            # pad=0: الحدود على الحبر تمامًا (seg/ye نهايات حصرية لأقصى عمود/صف حبري)
+            bx1 = max(0, wx1 + seg[0])
+            by1 = max(0, wy1 + ye[0])
+            bx2 = min(W, wx1 + seg[1])
+            by2 = min(H, wy1 + ye[1])
             if bx2 - bx1 >= 5 and by2 - by1 >= 5:
                 return {"found": True, "x1": int(bx1), "y1": int(by1),
                         "x2": int(bx2), "y2": int(by2)}
@@ -482,10 +485,11 @@ def _cc_word_box(img, win, seed_pt, band, vreach):
                    max(cur[2], b[2]), max(cur[3], b[3])]
             boxes[k] = None
             changed = True
-    x1 = max(0, wx1 + cur[0] - 2)
-    y1 = max(0, wy1 + cur[1] - 2)
-    x2 = min(W, wx1 + cur[2] + 3)
-    y2 = min(H, wy1 + cur[3] + 3)
+    # pad=0: المربع ملاصق للحبر (cur صندوق شامل الحواف → النهاية الحصرية +1)
+    x1 = max(0, wx1 + cur[0])
+    y1 = max(0, wy1 + cur[1])
+    x2 = min(W, wx1 + cur[2] + 1)
+    y2 = min(H, wy1 + cur[3] + 1)
     if x2 - x1 < 5 or y2 - y1 < 5:
         return {"found": False}
     return {"found": True, "x1": int(x1), "y1": int(y1),
@@ -711,6 +715,79 @@ def api_add_many(p):
                        (wd["x1"], wd["y1"], wd["x2"], wd["y2"]))
     app_log("add_many", page=name, n=len(out))
     return {"words": out}
+
+
+# ─────────────── القصّ إلى حدود الحبر تمامًا (نمط ABBYY) ───────────────
+def _ink_bbox_in(img_l, box):
+    """صندوق الحبر الدقيق داخل منطقة من الصفحة الرمادية — بإحداثيات الصفحة،
+    أو None إن كانت المنطقة خوية من الحبر."""
+    x1 = max(0, int(box[0]))
+    y1 = max(0, int(box[1]))
+    x2 = min(img_l.size[0], int(box[2]))
+    y2 = min(img_l.size[1], int(box[3]))
+    if x2 - x1 < 2 or y2 - y1 < 2:
+        return None
+    wlen, wht, ink = _strip_ink(img_l, (x1, y1, x2, y2))
+    ix1 = ix2 = iy1 = iy2 = None
+    for j in range(wht):
+        base = j * wlen
+        for i in range(wlen):
+            if ink[base + i]:
+                if ix1 is None or i < ix1:
+                    ix1 = i
+                if ix2 is None or i > ix2:
+                    ix2 = i
+                if iy1 is None:
+                    iy1 = j
+                iy2 = j
+    if ix1 is None:
+        return None
+    return (x1 + ix1, y1 + iy1, x1 + ix2 + 1, y1 + iy2 + 1)
+
+
+def api_tighten(p):
+    """تقليص المربعات إلى حدود الحبر تمامًا — بلا أي فراغ أبيض — كحفظ
+    الـpatterns في ABBYY FineReader، مع إعادة قص صور القصاصات فورًا حتى
+    لا تختلف أبعاد البيانات عند التدريب. ids=None يقلّص كل مربعات الصفحة
+    غير المتجاهلة؛ التقليص لا يوسّع أبدًا ولا يلمس ما هو ملاصق أصلًا."""
+    name = p["page_name"]
+    ids = p.get("ids")
+    conn = sqlite3.connect(DB_PATH)
+    if ids:
+        ph = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"""SELECT id, crop_path, x1, y1, x2, y2 FROM crops
+                WHERE page_name=? AND ignored=0 AND id IN ({ph})""",
+            (name, *[int(i) for i in ids])).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT id, crop_path, x1, y1, x2, y2 FROM crops
+               WHERE page_name=? AND ignored=0 ORDER BY id""",
+            (name,)).fetchall()
+    img = page_gray(name)
+    updated, regen = [], []
+    unchanged = empty = 0
+    for wid, crop_path, x1, y1, x2, y2 in rows:
+        nb = _ink_bbox_in(img, (x1, y1, x2, y2))
+        if nb is None:
+            empty += 1
+            continue
+        if nb == (x1, y1, x2, y2):
+            unchanged += 1
+            continue
+        conn.execute("UPDATE crops SET x1=?, y1=?, x2=?, y2=? WHERE id=?",
+                     (*nb, wid))
+        log_adj("tighten", name, wid, [x1, y1, x2, y2], list(nb))
+        updated.append({"id": wid, "x1": nb[0], "y1": nb[1],
+                        "x2": nb[2], "y2": nb[3]})
+        regen.append((crop_path, nb))
+    conn.commit()
+    conn.close()
+    for crop_path, nb in regen:
+        regen_crop_png(name, crop_path, nb)
+    app_log("tighten", page=name, n=len(updated),
+            all=ids is None, empty=empty)
+    return {"updated": updated, "unchanged": unchanged, "empty": empty}
 
 
 # ─────────────────── تحليل الصفحة كله وفواصل الأعمدة ───────────────────
@@ -1100,6 +1177,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(api_add(self._body()))
             if u.path == "/api/add_many":
                 return self._json(api_add_many(self._body()))
+            if u.path == "/api/tighten":
+                return self._json(api_tighten(self._body()))
             if u.path == "/api/delete":
                 return self._json(api_delete(self._body().get("ids", [])))
             if u.path == "/api/merge":

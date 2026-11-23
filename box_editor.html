@@ -83,6 +83,7 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <label class="lbl"><input type="checkbox" id="showLabels"> الوسوم</label>
     <label class="lbl" title="إظهار فاصل الأعمدة المكتشف في صفحات العمودين"><input type="checkbox" id="showCols" checked> الفاصل</label>
     <button id="analyzeBtn" title="كشف كل كلمات الصفحة وإنشاء مربعات مبدئية ضيقة حولها">✨ تحليل</button>
+    <button id="tightenAllBtn" title="تقليص كل مربعات الصفحة إلى حدود الحبر تمامًا (بلا فراغ أبيض) وإعادة قص القصاصات">⤡ ضيّق الكل</button>
     <button id="addBtn">➕ مربع جديد</button>
     <span style="width:1px;height:1.4rem;background:var(--line);margin:0 .15rem"></span>
     <button id="expTxt" title="تصدير نص الصفحة بترتيب القراءة: المجموعة العلوية أولًا ثم ما يليها">⬇ TXT</button>
@@ -122,6 +123,7 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <button class="warn" id="mergeBtn">⇥ دمج مع الجار</button>
     <button class="danger" id="delBtn">🗑 تجاهل</button>
     <button id="regenBtn" title="إعادة قص صورة القصاصة بالحدود الحالية">↻ إعادة قص</button>
+    <button id="tightenBtn" title="تقليص المربع المحدد إلى حدود الحبر تمامًا (نمط ABBYY) وإعادة قصه">⤡ ضيّق</button>
     <span class="sep"></span>
     <span class="lbl" id="confInfo"></span>
     <span style="flex:1"></span>
@@ -137,9 +139,12 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <b>اختصارات:</b> Enter = تأكيد الوسم والانتقال للكلمة التالية · الأسهم = تحريك المربع (مع Shift أسرع) ·
     <b>Ctrl+الأسهم = تغيير الحجم</b> (يمين/يسار = عرضًا، أعلى/أسفل = طولًا) ·
     <b>[ ]</b> = توسيع/تضييق ±5px · Delete = تجاهل · Esc = إلغاء التحديد · s = حفظ · Tab = الكلمة التالية في السطر.
-    في العرض المكبّر اسحب الفراغ لتحريك العرض، ونقرة بلا سحب تكشف الكلمة (مربع ضيق حول الكلمة المنقورة فقط).
+    في العرض المكبّر اسحب الفراغ لتحريك العرض، ونقرة بلا سحب تكشف الكلمة
+    (مربع ملاصق لحبرها تمامًا بلا أي فراغ أبيض — كحفظ الـpatterns في ABBYY).
     <b>✨ تحليل</b> يكشف كل كلمات الصفحة ويضيف مربعات مبدئية ضيقة حولها (يتخطى الموجود)، ويكشف
     <b>فاصل الأعمدة</b> في صفحات العمودين (يُرسم بخط أحمر متقطع — زر «الفاصل» يظهره/يخفيه).
+    <b>⤡ ضيّق</b> يقلّص المربع المحدد و<b>ضيّق الكل</b> يقلّص مربعات الصفحة كلها إلى
+    حدود الحبر تمامًا مع إعادة قص القصاصات فورًا — فلا تختلف أبعاد بيانات التدريب.
     <b>⬇ TXT / DOCX</b> تصدّر نص الصفحة بترتيب القراءة: <b>المجموعة العلوية أولًا</b> (حتى مجموعات زوايا
     الصفحة) ثم ما يليها، وبداخل السطر من اليمين لليسار للعربية.
     كل عمليات البرنامج تُسجَّل محليًا في <b>ocr_data/app_log.jsonl</b> (تُقرأ من /api/log)، وإرسال بيانات
@@ -313,7 +318,7 @@ function syncSelBar() {
   $("confInfo").textContent = w && w.confidence != null ? `ثقة آلية: ${w.confidence.toFixed(2)}` : "";
   $("labelIn").disabled = !w; $("langSel").disabled = !w;
   $("verChk").disabled = !w; $("ignChk").disabled = !w;
-  ["wider", "narrower", "growL", "shrinkL", "growR", "shrinkR", "splitBtn", "mergeBtn", "delBtn", "regenBtn"]
+  ["wider", "narrower", "growL", "shrinkL", "growR", "shrinkR", "splitBtn", "mergeBtn", "delBtn", "regenBtn", "tightenBtn"]
     .forEach(id => $(id).disabled = !w);
 }
 
@@ -631,6 +636,31 @@ $("regenBtn").onclick = () => {
   markDirty(w);
   status("… سيُعاد قص الصورة مع الحفظ");
 };
+
+/* ───────── القصّ إلى حدود الحبر تمامًا (نمط ABBYY) ───────── */
+async function tightenWords(ids) {
+  if (!S.data) return;
+  await saveDirty();                     // تصفية التعديلات المعلّقة أولًا
+  status("… تقليص إلى حدود الحبر وإعادة القص");
+  try {
+    const j = await jpost("/api/tighten",
+      {page_name: S.data.name, ids: ids || null});
+    j.updated.forEach(u => {
+      const w = wordById(u.id);
+      if (w) { w.x1 = u.x1; w.y1 = u.y1; w.x2 = u.x2; w.y2 = u.y2; }
+    });
+    S.dirty.clear();
+    S.lineCrops.clear();                 // قصاصات السطر/التكبير تغيّرت حدودها
+    status(`✓ قُلّص ${j.updated.length} مربعًا إلى حدود الحبر` +
+           (j.unchanged ? ` — ${j.unchanged} ملاصق أصلًا` : "") +
+           (j.empty ? ` — ${j.empty} بلا حبر` : ""));
+    tel("tighten");
+    syncSelBar();
+    draw();
+  } catch (e) { status("✗ تقليص: " + e.message, true); }
+}
+$("tightenBtn").onclick = () => { if (S.sel) tightenWords([S.sel.id]); };
+$("tightenAllBtn").onclick = () => tightenWords(null);
 function log(...a) { console.log("تعديل:", ...a); }
 
 /* ───────── شريط التحديد ───────── */
