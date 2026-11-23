@@ -67,12 +67,22 @@ def fetch_next(conn, lang, newest_first, skip_ids):
 
 # ────────────────────────────── منطق المراجعة ───────────────────────────────
 
-def render_row(row):
+def resolve_crop(p, db_path):
+    """مسارات القصاصات المستوردة قد تعود لجهاز آخر — إن لم يوجد الملف
+    فجرّب مجلد crops بجوار القاعدة (نفس قاعدة الخطوة 4)."""
+    q = Path(p)
+    if q.exists():
+        return q
+    alt = Path(db_path).parent / "crops" / q.name
+    return alt if alt.exists() else q
+
+
+def render_row(row, db_path):
     if row is None:
         return None, "", "", "🎉 لا مزيد من القصاصات تحت هذا الفلتر — وسّع الفلتر أو انتقل للخطوة 4 (التصدير)."
     cid, path, label, conf, lang, page = row
     badge = f"#{cid} | اللغة: {lang or 'unknown'} | الثقة: {conf if conf is not None else '—'} | الصفحة: {page}"
-    return path, label or "", badge, ""
+    return str(resolve_crop(path, db_path)), label or "", badge, ""
 
 
 def review_action(conn, action, cid, new_label):
@@ -112,7 +122,7 @@ def build_demo(db_path):
     left0, ver0, ign0, langs0 = stats(conn, None)
     skip_ids0, last0 = [], None
     first = fetch_next(conn, "الكل", False, skip_ids0)
-    img0, label0, badge0, msg0 = render_row(first)
+    img0, label0, badge0, msg0 = render_row(first, db_path)
 
     with gr.Blocks(title="مراجعة الوسوم الآلية — OCR") as demo:
         gr.Markdown(
@@ -157,7 +167,7 @@ def build_demo(db_path):
                 skip = []
                 nxt = fetch_next(conn, lang, newest, skip)
             left, ver, ign, _ = stats(conn, lang)
-            img_, label_, badge_, msg2_ = render_row(nxt)
+            img_, label_, badge_, msg2_ = render_row(nxt, db_path)
             msg_all = (msg + " " if msg else "") + (msg2_ or "")
             return (skip, last, nxt[0] if nxt else None, img_, label_, badge_, msg_all,
                     f"متبقي للمراجعة: **{left}** | مُراجَع: **{ver}** | متجاهَل: **{ign}**")
