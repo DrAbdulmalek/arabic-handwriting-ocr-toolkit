@@ -38,6 +38,12 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
 #helpBox{font-size:.8rem;color:var(--mut);line-height:1.7;margin-top:.4rem;border-top:1px dashed var(--line);padding-top:.4rem}
 .legend{display:inline-flex;align-items:center;gap:.3rem;margin-inline-start:.6rem;font-size:.72rem;color:var(--mut)}
 .sw{width:.9em;height:.9em;border-radius:.2rem;display:inline-block}
+#overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;z-index:50}
+#overlay[hidden]{display:none}   /* display:flex يتغلب على سمة hidden الافتراضية — نفرض الإخفاء */
+#consent{background:var(--card);border-radius:.8rem;max-width:30rem;width:min(92vw,30rem);padding:1.1rem 1.2rem;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+#consent h2{margin:0 0 .4rem;color:var(--acc);font-size:1.05rem}
+#consent p{margin:.35rem 0;font-size:.85rem;line-height:1.7}
+#consent .btns{display:flex;gap:.5rem;margin-top:.7rem}
 @media (max-width:640px){
   h1{white-space:normal}
   progress{width:90px}
@@ -75,7 +81,12 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <button id="nextLine">▼ سطر</button>
     <label class="lbl"><input type="checkbox" id="showLines" checked> الأسطر</label>
     <label class="lbl"><input type="checkbox" id="showLabels"> الوسوم</label>
+    <label class="lbl" title="إظهار فاصل الأعمدة المكتشف في صفحات العمودين"><input type="checkbox" id="showCols" checked> الفاصل</label>
+    <button id="analyzeBtn" title="كشف كل كلمات الصفحة وإنشاء مربعات مبدئية ضيقة حولها">✨ تحليل</button>
     <button id="addBtn">➕ مربع جديد</button>
+    <span style="width:1px;height:1.4rem;background:var(--line);margin:0 .15rem"></span>
+    <button id="expTxt" title="تصدير نص الصفحة بترتيب القراءة: المجموعة العلوية أولًا ثم ما يليها">⬇ TXT</button>
+    <button id="expDocx" title="تصدير Word بترتيب القراءة">⬇ DOCX</button>
     <span style="flex:1"></span>
     <span class="legend"><span class="sw" style="background:#2563eb"></span>آلي</span>
     <span class="legend"><span class="sw" style="background:#16a34a"></span>مؤكد</span>
@@ -126,9 +137,30 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
     <b>اختصارات:</b> Enter = تأكيد الوسم والانتقال للكلمة التالية · الأسهم = تحريك المربع (مع Shift أسرع) ·
     <b>Ctrl+الأسهم = تغيير الحجم</b> (يمين/يسار = عرضًا، أعلى/أسفل = طولًا) ·
     <b>[ ]</b> = توسيع/تضييق ±5px · Delete = تجاهل · Esc = إلغاء التحديد · s = حفظ · Tab = الكلمة التالية في السطر.
-    في العرض المكبّر اسحب الفراغ لتحريك العرض، ونقرة بلا سحب تكشف الكلمة.
+    في العرض المكبّر اسحب الفراغ لتحريك العرض، ونقرة بلا سحب تكشف الكلمة (مربع ضيق حول الكلمة المنقورة فقط).
+    <b>✨ تحليل</b> يكشف كل كلمات الصفحة ويضيف مربعات مبدئية ضيقة حولها (يتخطى الموجود)، ويكشف
+    <b>فاصل الأعمدة</b> في صفحات العمودين (يُرسم بخط أحمر متقطع — زر «الفاصل» يظهره/يخفيه).
+    <b>⬇ TXT / DOCX</b> تصدّر نص الصفحة بترتيب القراءة: <b>المجموعة العلوية أولًا</b> (حتى مجموعات زوايا
+    الصفحة) ثم ما يليها، وبداخل السطر من اليمين لليسار للعربية.
+    كل عمليات البرنامج تُسجَّل محليًا في <b>ocr_data/app_log.jsonl</b> (تُقرأ من /api/log)، وإرسال بيانات
+    الاستخدام المجهولة للمطوّر لا يتم إلا بعد إذنك عند أول تشغيل.
   </div>
 </aside>
+
+<div id="overlay" hidden>
+  <div id="consent" role="dialog" aria-modal="true">
+    <h2>📡 إذن إرسال بيانات الاستخدام للمطوّر</h2>
+    <p>لتطوير الأداة يمكن إرسال أحداث استخدام <b>مجهولة تمامًا</b>: أنواع العمليات
+       وأعدادها (تحليل، تصدير، إضافة مربع…) ونسخة البرنامج.</p>
+    <p><b>لا تُرسل أي صور أو نصوص مكتوبة أو محتوى القصاصات.</b> السجل المحلي الكامل
+       يبقى على جهازك في <code>ocr_data/app_log.jsonl</code> في الحالتين.</p>
+    <p>يمكنك تغيير رأيك لاحقًا من الطرفية: <code>python 7_box_editor_server.py --consent yes|no</code></p>
+    <div class="btns">
+      <button id="cYes" class="on">موافق على الإرسال</button>
+      <button id="cNo">أرفض</button>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -140,7 +172,8 @@ const S = {
   mode: "page", lineIdx: 0, zoom: 3, sel: null,
   dirty: new Set(), saving: false,
   addMode: false, drag: null, hoverLine: -1,
-  freeView: null, showLines: true, showLabels: false,
+  freeView: null, showLines: true, showLabels: false, showCols: true,
+  columns: [], consent: null,
   filter: "all", lineCrops: new Map(),
 };
 let DPR = 1;
@@ -160,6 +193,11 @@ function status(txt, err) {
   const el = $("saveState");
   el.textContent = txt;
   el.className = err ? "err" : "";
+}
+function tel(ev) {
+  // إرسال حدث استخدام مجهول — فقط بعد إذن المستخدم الصريح
+  if (S.consent !== true) return;
+  jpost("/api/telemetry", {events: [{event: ev}]}).catch(() => {});
 }
 function wordById(id) { return S.data ? S.data.words.find(w => w.id === id) : null; }
 function activeWords() { return S.data.words.filter(w => !w.ignored); }
@@ -218,6 +256,7 @@ async function loadPage(name) {
   d.words.forEach(w => { w.line = -1; });
   S.data = d;
   S.sel = null; S.dirty.clear(); S.freeView = null;
+  S.columns = [];
   S.lineCrops.clear();
   d.words.forEach(w => { w.line = lineOf(w); });
   const img = new Image();
@@ -229,6 +268,7 @@ async function loadPage(name) {
   if (first) S.lineIdx = first.line;
   syncLinePos(); syncSelBar(); fillPages();
   status("✓ جاهزة");
+  tel("page_open");
   draw();
 }
 
@@ -302,6 +342,17 @@ function draw() {
       ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     });
     ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  // فاصل الأعمدة المكتشف (صفحات العمودين)
+  if (S.showCols && S.columns.length) {
+    ctx.fillStyle = "rgba(220,38,38,.08)";
+    ctx.strokeStyle = "#dc2626"; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+    S.columns.forEach(c => {
+      const a = toScreen(c.x1, 0, V), b = toScreen(c.x2, S.data.height, V);
+      ctx.fillRect(a.x, 0, Math.max(2, b.x - a.x), h);
+      ctx.strokeRect(a.x, 0, b.x - a.x, h);
+    });
+    ctx.setLineDash([]);
   }
   // الكلمات
   for (const wd of S.data.words) {
@@ -679,6 +730,55 @@ $("zoomR").addEventListener("input", () => {
   if (S.mode === "zoom") { S.freeView = null; draw(); }
 });
 $("showLines").addEventListener("change", () => { S.showLines = $("showLines").checked; draw(); });
+$("showCols").addEventListener("change", () => { S.showCols = $("showCols").checked; draw(); });
+
+/* ───────── التحليل الآلي للصفحة كله ───────── */
+$("analyzeBtn").onclick = async () => {
+  if (!S.data) return;
+  $("analyzeBtn").disabled = true;
+  status("… تحليل الصفحة وكشف الكلمات");
+  try {
+    const j = await jget("/api/analyze?name=" + encodeURIComponent(S.data.name));
+    S.columns = j.columns || [];
+    const have = activeWords();
+    const fresh = (j.words || []).filter(b => !have.some(w => {
+      const ix = Math.min(w.x2, b.x2) - Math.max(w.x1, b.x1);
+      const iy = Math.min(w.y2, b.y2) - Math.max(w.y1, b.y1);
+      if (ix <= 0 || iy <= 0) return false;
+      const a1 = (w.x2 - w.x1) * (w.y2 - w.y1);
+      const a2 = (b.x2 - b.x1) * (b.y2 - b.y1);
+      return ix * iy / Math.min(a1, a2) > 0.45;
+    }));
+    let added = 0;
+    if (fresh.length) {
+      const j2 = await jpost("/api/add_many", {page_name: S.data.name,
+        items: fresh.map(b => ({x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2,
+                                language: "arabic"}))});
+      j2.words.forEach(w => { w.line = lineOf(w); S.data.words.push(w); });
+      added = j2.words.length;
+    }
+    status(`✓ تحليل: ${added} مربعًا جديدًا، ${have.length} موجودًا سلفًا` +
+           (S.columns.length ? ` — فاصل الأعمدة: ${S.columns.length}` : ""));
+    tel("analyze");
+    draw();
+  } catch (e) { status("✗ تحليل: " + e.message, true); }
+  $("analyzeBtn").disabled = false;
+};
+
+/* ───────── تصدير الصفحة بترتيب القراءة ───────── */
+function exportPage(fmt) {
+  if (!S.data) return;
+  const a = document.createElement("a");
+  a.href = `/api/export_page?name=${encodeURIComponent(S.data.name)}&fmt=${fmt}`;
+  a.download = `${S.data.name}.${fmt}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  status(`⬇ صُدِّر ${fmt.toUpperCase()} — المجموعة العلوية أولًا ثم ما يليها`);
+  tel("export_" + fmt);
+}
+$("expTxt").onclick = () => exportPage("txt");
+$("expDocx").onclick = () => exportPage("docx");
 $("showLabels").addEventListener("change", () => { S.showLabels = $("showLabels").checked; draw(); });
 $("addBtn").onclick = () => {
   S.addMode = !S.addMode;
@@ -720,12 +820,33 @@ document.addEventListener("keydown", ev => {
 });
 
 /* ───────── الإقلاع ───────── */
+async function askConsent() {
+  // إذن إرسال بيانات الاستخدام المجهولة — يُسأل عنه مرة واحدة فقط
+  let st = "err";
+  try { st = (await jget("/api/consent")).consent; } catch (e) { return; }
+  if (st === true || st === false) { S.consent = st; return; }
+  $("overlay").hidden = false;
+  await new Promise(res => {
+    $("cYes").onclick = async () => {
+      S.consent = true;
+      try { await jpost("/api/consent", {consent: true}); } catch (e) {}
+      $("overlay").hidden = true; res();
+    };
+    $("cNo").onclick = async () => {
+      S.consent = false;
+      try { await jpost("/api/consent", {consent: false}); } catch (e) {}
+      $("overlay").hidden = true; res();
+    };
+  });
+}
 window.BE = S;   // خُطّاف للتصحيح والاختبار الآلي: حالة المحرر كاملة من الكونسول
 window.addEventListener("resize", draw);
 // إعادة رسم عند أي تغيّر في حجم مساحة العرض (يثبت التوسيط بعد اكتمال التخطيط)
 new ResizeObserver(() => draw()).observe(document.querySelector("main"));
 (async () => {
   try {
+    await askConsent();
+    tel("app_open");
     await loadPages();
     const list = pageList();
     if (list.length) {
