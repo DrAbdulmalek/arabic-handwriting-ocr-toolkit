@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>واجهة البدء — حزمة OCR الخط اليدوي (عربي + إنجليزي + ألماني)</title>
+<style>
+  :root{
+    --bg:#0f1420; --card:#171e2e; --card2:#1d2740; --line:#2a3552;
+    --txt:#eef2fb; --mut:#9aa7c4; --acc:#4f8cff; --acc2:#22c58b;
+    --warn:#ffb84d; --bad:#ff6b6b; --r:14px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  code{direction:ltr; unicode-bidi:isolate; display:inline-block}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:"Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif;
+    line-height:1.7; font-size:clamp(15px,2.4vw,17px);
+  }
+  .wrap{max-width:960px; margin:0 auto; padding:clamp(12px,3vw,28px)}
+  header{padding:clamp(18px,4vw,34px) 0 8px}
+  .brand{display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+  .logo{width:clamp(46px,10vw,64px); height:clamp(46px,10vw,64px); border-radius:16px;
+    background:linear-gradient(135deg,#4f8cff,#22c58b); display:flex; align-items:center;
+    justify-content:center; font-size:clamp(24px,5vw,32px); flex-shrink:0}
+  h1{font-size:clamp(19px,4.6vw,30px); line-height:1.35}
+  .sub{color:var(--mut); font-size:clamp(13px,2.8vw,15px); margin-top:4px}
+  .badges{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px}
+  .badge{background:var(--card2); border:1px solid var(--line); color:var(--mut);
+    border-radius:999px; padding:4px 14px; font-size:clamp(11.5px,2.4vw,13px)}
+  .badge b{color:var(--txt)}
+  .badge.ok b{color:var(--acc2)} .badge.now b{color:var(--acc)} .badge.warn b{color:var(--warn)}
+
+  section{background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    padding:clamp(14px,3.2vw,24px); margin-top:clamp(14px,3vw,22px)}
+  h2{font-size:clamp(16px,3.6vw,21px); margin-bottom:10px; display:flex; align-items:center; gap:8px}
+  h2 .n{width:26px;height:26px;border-radius:8px;background:var(--card2);border:1px solid var(--line);
+    display:inline-flex;align-items:center;justify-content:center;font-size:14px;color:var(--acc);flex-shrink:0}
+  p.desc{color:var(--mut); font-size:clamp(13px,2.7vw,15px); margin-bottom:12px}
+
+  /* البطاقة البارزة: الخطوة التالية */
+  .next{background:linear-gradient(135deg,#1b2b52,#143326); border:1px solid #2f5c94}
+  .next .big{font-size:clamp(16px,3.8vw,20px); font-weight:700; margin-bottom:6px}
+  .ring{display:flex; align-items:center; gap:16px; flex-wrap:wrap}
+  .ring svg{width:clamp(74px,16vw,96px); height:clamp(74px,16vw,96px); flex-shrink:0}
+
+  /* إحصاءات */
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px}
+  .stat{background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:12px 14px}
+  .stat .v{font-size:clamp(19px,4.4vw,26px); font-weight:800; color:var(--acc)}
+  .stat .v.g{color:var(--acc2)} .stat .v.w{color:var(--warn)}
+  .stat .k{color:var(--mut); font-size:clamp(11.5px,2.4vw,13px); margin-top:2px}
+  canvas{max-width:100%; height:auto; display:block; margin-top:14px}
+  .charts{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  @media (max-width:640px){.charts{grid-template-columns:1fr}}
+
+  /* خطوات الأنابيب */
+  .steps{display:flex; flex-direction:column; gap:8px}
+  .step{display:flex; gap:12px; align-items:flex-start; background:var(--card2);
+    border:1px solid var(--line); border-radius:12px; padding:10px 14px}
+  .step .ic{width:30px; height:30px; border-radius:50%; display:flex; align-items:center;
+    justify-content:center; flex-shrink:0; font-size:15px; margin-top:2px}
+  .done .ic{background:#12331f; color:var(--acc2); border:1px solid #1e5a36}
+  .now .ic{background:#12274a; color:var(--acc); border:1px solid #2f5c94; animation:pulse 2s infinite}
+  .later .ic{background:#1d2740; color:var(--mut); border:1px solid var(--line)}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(79,140,255,.45)}50%{box-shadow:0 0 0 7px rgba(79,140,255,0)}}
+  .step b{display:block; font-size:clamp(14px,3vw,16px)}
+  .step span{color:var(--mut); font-size:clamp(12px,2.6vw,13.5px)}
+  .step code{background:#101828; border:1px solid var(--line); border-radius:6px; padding:1px 7px;
+    font-size:.86em; color:#c8d6f5; direction:ltr; display:inline-block}
+
+  /* أوامر + نسخ */
+  .cmdbox{position:relative; background:#0b1020; border:1px solid var(--line); border-radius:10px;
+    margin:10px 0; overflow:hidden}
+  .cmdbox pre{padding:12px 14px; direction:ltr; text-align:left; overflow-x:auto;
+    font-family:Consolas,Menlo,monospace; font-size:clamp(12px,2.7vw,14px); color:#d7e4ff; line-height:1.6}
+  .copy{position:absolute; top:8px; left:8px; background:var(--card2); color:var(--mut);
+    border:1px solid var(--line); border-radius:8px; padding:4px 12px; cursor:pointer; font-size:12px}
+  .copy:hover{color:var(--txt); border-color:var(--acc)}
+  .copy.okd{color:var(--acc2); border-color:var(--acc2)}
+
+  /* طرق التشغيل */
+  .tabs{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px}
+  .tab{background:var(--card2); border:1px solid var(--line); color:var(--mut); border-radius:10px;
+    padding:8px 16px; cursor:pointer; font-size:clamp(13px,2.8vw,15px)}
+  .tab.active{color:var(--txt); border-color:var(--acc); background:#12274a}
+  .pane{display:none} .pane.active{display:block}
+
+  /* روابط */
+  .links{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px}
+  a.lk{display:flex; gap:10px; align-items:center; background:var(--card2); border:1px solid var(--line);
+    border-radius:12px; padding:12px 14px; color:var(--txt); text-decoration:none; transition:border-color .2s}
+  a.lk:hover{border-color:var(--acc)} a.lk small{display:block; color:var(--mut); font-size:12px}
+
+  /* قائمة التحقق */
+  .chk{display:flex; gap:10px; align-items:flex-start; padding:9px 4px; border-bottom:1px dashed var(--line); cursor:pointer}
+  .chk:last-child{border-bottom:none}
+  .chk .bx{width:22px; height:22px; border-radius:6px; border:2px solid var(--line); flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:13px; margin-top:2px; color:#0f1420}
+  .chk.on .bx{background:var(--acc2); border-color:var(--acc2)}
+  .chk.on .t{color:var(--mut); text-decoration:line-through}
+  .pbar{height:10px; background:var(--card2); border:1px solid var(--line); border-radius:999px; overflow:hidden; margin:10px 0}
+  .pbar i{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--acc),var(--acc2)); transition:width .3s}
+
+  table{width:100%; border-collapse:collapse; font-size:clamp(12.5px,2.7vw,14.5px)}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:right}
+  th{background:var(--card2)} td.m{direction:ltr; text-align:left; font-family:Consolas,Menlo,monospace; font-size:.9em}
+  .tw{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  .warnbox{background:#2b2113; border:1px solid #6b5420; border-radius:12px; padding:12px 16px; margin-top:12px}
+  .note{color:var(--mut); font-size:clamp(11.5px,2.4vw,13px); margin-top:10px}
+  footer{color:var(--mut); text-align:center; font-size:12.5px; padding:26px 0 34px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="brand">
+    <div class="logo">✍️</div>
+    <div>
+      <h1>حزمة OCR الخط اليدوي — عربي + إنجليزي + ألماني</h1>
+      <div class="sub">TrOCR • ViT + mBERT • SQLite • Colab T4 — واجهة البدء الموحّدة</div>
+    </div>
+  </div>
+  <div class="badges">
+    <span class="badge ok">الحزمة: <b>مرفوعة على GitHub</b> ✓</span>
+    <span class="badge warn">المراجعة البشرية: <b>0 / 55,124</b></span>
+    <span class="badge now">الخطوة الحالية: <b>٣ب — مراجعة الوسوم</b></span>
+  </div>
+</header>
+
+<!-- الخطوة التالية -->
+<section class="next">
+  <div class="big">🚦 ابدأ من هنا: راجع وسوم القصاصات الآلية</div>
+  <p class="desc">قاعدة بياناتك تضم <b style="color:var(--txt)">55,124 قصاصة</b> وسمت آليًا من مشروعك السابق (notes.db:auto) ولم تُراجَع بعد. ثقتها المتوسطة <b style="color:var(--warn)">0.427</b> — أي أن أكثر من نصفها مرجّح الخطأ. أداة المراجعة تعرض الأقل ثقة أولًا وتحفظ قراراتك (قبول / تصحيح / تجاهل) في <code>crops.db</code>، والتصدير والتدريب ينتظران هذه القرارات.</p>
+  <div class="ring">
+    <svg viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="42" fill="none" stroke="#2a3552" stroke-width="10"/>
+      <circle cx="50" cy="50" r="42" fill="none" stroke="#4f8cff" stroke-width="10"
+        stroke-dasharray="0 264" stroke-linecap="round" transform="rotate(-90 50 50)"/>
+      <text x="50" y="47" text-anchor="middle" fill="#eef2fb" font-size="17" font-weight="700">0%</text>
+      <text x="50" y="63" text-anchor="middle" fill="#9aa7c4" font-size="9">مُراجَع</text>
+    </svg>
+    <div>
+      <div style="direction:ltr;text-align:left">
+        <div class="cmdbox"><button class="copy">نسخ</button><pre>python 3b_review_app.py</pre></div>
+      </div>
+      <div style="color:var(--mut);font-size:clamp(12px,2.6vw,13.5px)">في Colab: الخلية <b style="color:var(--txt)">٦ب</b> من الدفتر تفتح الأداة نفسها برابط عام.</div>
+    </div>
+  </div>
+  <div class="note">هدف عملي: راجع دفعة أولى من شريحة الثقة الأدنى (‏34,602 قصاصة أقل من 0.5) — بعد ~2,000 مراجعة ستتضح جودة الوسم الآلي وتستطيع التصدير بفلتر <code>--min-confidence</code>.</div>
+</section>
+
+<!-- الحالة الحية -->
+<section>
+  <h2><span class="n">1</span>حالة البيانات — لقطة حقيقية من قاعدتك (2026-11-23)</h2>
+  <p class="desc">أرقام مستخرجة فعليًا من <code>crops.db</code> المرفق في Archive.zip — للأرقام الحية بعد أي تعديل افتح لوحة الخادم <code>http://127.0.0.1:7863/panel</code>.</p>
+  <div class="grid">
+    <div class="stat"><div class="v">55,124</div><div class="k">قصاصة كلمات في القاعدة</div></div>
+    <div class="stat"><div class="v">282</div><div class="k">صفحة خط يدوي</div></div>
+    <div class="stat"><div class="v w">0</div><div class="k">مُراجَع بشريًا (verified)</div></div>
+    <div class="stat"><div class="v">0.427</div><div class="k">متوسط ثقة الوسم الآلي</div></div>
+    <div class="stat"><div class="v g">49,353</div><div class="k">تدريب train</div></div>
+    <div class="stat"><div class="v g">2,703</div><div class="k">تحقق val</div></div>
+    <div class="stat"><div class="v g">3,068</div><div class="k">اختبار test</div></div>
+    <div class="stat"><div class="v">1,153</div><div class="k">قصاصات إنجليزية</div></div>
+  </div>
+  <div class="charts">
+    <div>
+      <canvas id="cConf" width="560" height="300" aria-label="توزيع الثقة"></canvas>
+    </div>
+    <div>
+      <canvas id="cLang" width="560" height="300" aria-label="توزيع اللغات"></canvas>
+    </div>
+  </div>
+  <div class="note">توزيع اللغات حسب عمود <code>language</code>: العربي 53,971 والإنجليزي 1,153 — القصاصات الألمانية ستُصنّف أثناء المراجعة (الفك mBERT يغطيها أصلاً).</div>
+</section>
+
+<!-- خريطة الأنابيب -->
+<section>
+  <h2><span class="n">2</span>خريطة الأنابيب — أين أنت الآن</h2>
+  <div class="steps">
+    <div class="step done"><div class="ic">✓</div><div><b>1 — تنزيل الـ bucket</b><span><code>1_download_bucket.py</code> — نسخ الاحتياطية من <code>DrAbdulmalek/github-repo-backups/2026-10-14</code> نُزّلت سابقًا.</span></div></div>
+    <div class="step done"><div class="ic">✓</div><div><b>2 — فحص النسخ وتجهيز الصفحات</b><span><code>2_inspect_backups.py</code> — الاستخراج الآمن والرندر تم: 282 صفحة في <code>ocr_data/pages/</code>.</span></div></div>
+    <div class="step done"><div class="ic">✓</div><div><b>3 — قص ووسم الكلمات</b><span><code>3_labeling_app.py</code> — 55,124 قصاصة موجودة (مستوردة آليًا من مشروعك السابق).</span></div></div>
+    <div class="step now"><div class="ic">●</div><div><b>٣ب — مراجعة الوسوم الآلية ← أنت هنا</b><span><code>3b_review_app.py</code> — قبول/تصحيح/تجاهل، الأقل ثقة أولًا، الحفظ في القاعدة.</span></div></div>
+    <div class="step later"><div class="ic">○</div><div><b>٣ج — تعديل مربعات الكلمات على الصفحات</b><span><code>7_box_editor_server.py</code> — سحب الحواف، تقسيم/دمج، ثلاثة ألوان للحالة، حفظ تلقائي + إعادة قص.</span></div></div>
+    <div class="step later"><div class="ic">○</div><div><b>4 — تصدير مجموعة التدريب</b><span><code>4_export_dataset.py</code> — تنظيف NFC، استبعاد المتجاهل، تمرير المُراجَع دائمًا، تقسيم على مستوى الصفحة.</span></div></div>
+    <div class="step later"><div class="ic">○</div><div><b>5 — تدريب TrOCR على Colab T4</b><span><code>5_train_trocr_colab.py --epochs 20</code> — فك mBERT ثلاثي اللغات، CER/WER، توقف مبكر.</span></div></div>
+    <div class="step later"><div class="ic">○</div><div><b>6 — تجربة النموذج</b><span><code>6_predict.py --model trocr-multilingual-handwritten --image …</code></span></div></div>
+  </div>
+</section>
+
+<!-- طرق التشغيل -->
+<section>
+  <h2><span class="n">3</span>ثلاث طرق للتشغيل — اختر جهازك</h2>
+  <div class="tabs">
+    <button class="tab active" data-p="p1">💻 اللابتوب</button>
+    <button class="tab" data-p="p2">📱 Colab من الجوال</button>
+    <button class="tab" data-p="p3">🌐 جوال عبر الإنترنت</button>
+  </div>
+
+  <div class="pane active" id="p1">
+    <p class="desc">الأسرع والأكثر ثباتًا — البيانات محلية والحفظ مباشر في قاعدة اللابتوب:</p>
+    <div class="cmdbox"><button class="copy">نسخ</button><pre># 0) أفك ضغط الحزمة الكاملة ثم ادخل مجلدها — كل السكربتات داخلها
+# (ويندوز: Expand-Archive أو زر يمين «Extract All» — لينكس/ماك:)
+unzip "arabic-handwriting-ocr-toolkit(2).zip"
+cd arabic-handwriting-ocr-toolkit
+pip install -r requirements.txt</pre></div>
+    <div class="cmdbox"><button class="copy">نسخ</button><pre># 1) تجهيز البيانات مرة واحدة — يجلب القاعدة + 55 ألف صورة قصاصة + الصفحات
+# من المستودع الخاص handwriting-ocr-crops (يطالب برمز Read مخفيًا — لا تلصقه في الملفات)
+python 0_setup_local.py</pre></div>
+    <div class="cmdbox"><button class="copy">نسخ</button><pre># 2) تشغيل الخادم الموحد (المحرر + لوحة التحكم + QR)
+python 7_box_editor_server.py --host 0.0.0.0</pre></div>
+    <p class="desc">ثم من المتصفح: <code style="direction:ltr;display:inline-block">http://127.0.0.1:7863/panel</code> — ستجد <b style="color:var(--txt)">رمز QR مطبوعًا في الطرفية</b> امسحه بكاميرا الجوال للعمل على نفس الشبكة.</p>
+    <div class="cmdbox"><button class="copy">نسخ</button><pre># مراجعة الوسوم (الخطوة الحالية) ثم تحديث مجموعة التدريب بعدها:
+python 3b_review_app.py
+python 4_export_dataset.py</pre></div>
+  </div>
+
+  <div class="pane" id="p2">
+    <p class="desc">من جوالك مباشرة دون لابتوب — كل شيء يعمل على سيرفر جوجل:</p>
+    <div class="cmdbox"><button class="copy">نسخ</button><pre># افتح الدفتر من مستودعك ثم «Open in Colab»:
+# github.com/DrAbdulmalek/arabic-handwriting-ocr-toolkit → OCR_Pipeline_Colab.ipynb</pre></div>
+    <div class="cmdbox"><button class="copy">نسخ</button><pre># داخل Colab: أضف Secret باسم HF_TOKEN (أيقونة المفتاح) + Notebook access
+# ثم شغّل الخلايا بالترتيب حتى ٦ج — تنزّل البيانات تلقائيًا من المستودع الخاص
+# وتطبع رابطي المحرر واللوحة (تعمل من أي شبكة)</pre></div>
+    <p class="desc">بعد الانتهاء من المراجعة في ٦ب والمربعات في ٦ج: أوقف الخلية وأعد تشغيل خلية التصدير ثم خلية التدريب (T4).</p>
+  </div>
+
+  <div class="pane" id="p3">
+    <p class="desc">اللابتوب يشغّل الخادم والجوال يتصل عبر رابط مؤقت من أي شبكة:</p>
+    <div class="cmdbox"><button class="copy">نسخ</button><pre># من اللابتوب:
+python 7_box_editor_server.py --host 0.0.0.0
+cloudflared tunnel --url http://127.0.0.1:7863</pre></div>
+    <p class="desc">انسخ الرابط العام المطبوع وافتحه من جوالك. <b style="color:var(--warn)">الرابط مؤقت</b> — أوقف النفق (Ctrl+C) بعد الانتهاء.</p>
+  </div>
+</section>
+
+<!-- روابط -->
+<section>
+  <h2><span class="n">4</span>روابط سريعة</h2>
+  <div class="links">
+    <a class="lk" href="https://github.com/DrAbdulmalek/arabic-handwriting-ocr-toolkit" target="_blank" rel="noopener">📦<span>مستودع الحزمة (خاص)<small>كل السكربتات + الدفتر + README</small></span></a>
+    <a class="lk" href="https://huggingface.co/buckets/DrAbdulmalek/github-repo-backups/tree/2026-10-14" target="_blank" rel="noopener">☁️<span>HF Bucket — مصدر البيانات<small>مجلد 2026-10-14</small></span></a>
+    <a class="lk" href="https://huggingface.co/DrAbdulmalek" target="_blank" rel="noopener">🤗<span>حساب HF — النماذج والمستودعات الخاصة<small>بيانات الخط اليدوي + النموذج لاحقًا</small></span></a>
+    <a class="lk" href="https://colab.research.google.com/" target="_blank" rel="noopener">🎓<span>Google Colab — التدريب على T4<small>Runtime → T4 GPU</small></span></a>
+    <a class="lk" href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener">🔑<span>إلغاء توكن HF<small>ألغِ فورًا أي رمز لُصق في دردشة</small></span></a>
+    <a class="lk" href="https://github.com/settings/tokens" target="_blank" rel="noopener">🔐<span>إلغاء توكن GitHub<small>نفس القاعدة — دوّر الرموز بعد كل عمل</small></span></a>
+  </div>
+</section>
+
+<!-- قائمة التحقق -->
+<section>
+  <h2><span class="n">5</span>قائمة تحقق الانطلاق — تُحفظ في متصفحك</h2>
+  <div class="pbar"><i id="pfill"></i></div>
+  <div id="checklist">
+    <div class="chk"><div class="bx"></div><div class="t">ألغيت (revoke) توكني GitHub وHF اللذين ظهرا في الدردشة، وولّدت رمز Read جديدًا للاستخدام في Secrets فقط</div></div>
+    <div class="chk"><div class="bx"></div><div class="t">نفّذت <code>git clone</code> للحزمة أو نزلت <code>arabic-handwriting-ocr-toolkit.zip</code> إلى جهاز العمل</div></div>
+    <div class="chk"><div class="bx"></div><div class="t">شغّلت <code>0_setup_local.py</code> ونجح تنزيل البيانات من المستودع الخاص</div></div>
+    <div class="chk"><div class="bx"></div><div class="t">فتحت <code>3b_review_app.py</code> وراجعت أول دفعة (100+ قصاصة) من الأقل ثقة</div></div>
+    <div class="chk"><div class="bx"></div><div class="t">راجعت المربعات في <code>7_box_editor_server.py</code> لصفحات عينة (تقسيم/دمج/ضبط الحواف)</div></div>
+    <div class="chk"><div class="bx"></div><div class="t">شغّلت <code>4_export_dataset.py</code> وتأكدت من أن الأعداد في نسخة التدقيق CSV منطقية</div></div>
+    <div class="chk"><div class="bx"></div><div class="t">شغّلت خلية التدريب في Colab (T4) بنجاح وبدأ نزول CER</div></div>
+    <div class="chk"><div class="bx"></div><div class="t">جرّبت <code>6_predict.py</code> على صفحات جديدة وقيّمت النتيجة</div></div>
+  </div>
+</section>
+
+<!-- توقعات واقعية -->
+<section>
+  <h2><span class="n">6</span>توقعات واقعية للتدريب</h2>
+  <div class="tw"><table>
+    <tr><th>القصاصات المُراجَعة عند التصدير</th><th>ما تتوقعه</th></tr>
+    <tr><td>أقل من 200</td><td>نموذج تجريبي — يتدرب لكن نتائجه متواضعة</td></tr>
+    <tr><td>500 – 2,000</td><td>دقة معقولة على كلماتك نفسها بأسلوبك</td></tr>
+    <tr><td>3,000+</td><td>أساس جيد لتعميم محتمل على خطوط مشابهة</td></tr>
+  </table></div>
+  <p class="desc">مع 55,124 قصاصة في القاعدة، حتى مراجعة جزء جيد منها بجودة عالية تتجاوز حد الـ3,000 بسهولة — الأولوية للجودة لا للكمية: صفحات أكثر أفضل من قصاصات أكثر من نفس الصفحة.</p>
+  <div class="warnbox">⚠️ <b>تذكير أمني:</b> أي رمز وصول لُصق في دردشة أو ملف يُعد مكشوفًا. السكربتات كلها تقرأ الرموز من البيئة فقط (Secrets في Colab أو <code>hf auth login</code> محليًا) — ولا تضعها أبدًا داخل ملف أو خلية.</div>
+</section>
+
+<footer>واجهة البدء الموحّدة — ملف ثابت يعمل دون خادم • لقطة البيانات: 2026-11-23 من crops.db • المستودع: DrAbdulmalek/arabic-handwriting-ocr-toolkit</footer>
+</div>
+
+<script>
+// أزرار النسخ
+document.querySelectorAll('.copy').forEach(function(b){
+  b.addEventListener('click', function(){
+    var pre = b.parentElement.querySelector('pre');
+    var txt = pre.innerText;
+    function done(){ b.textContent='✓ نُسخ'; b.classList.add('okd'); setTimeout(function(){b.textContent='نسخ'; b.classList.remove('okd');},1600); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(done).catch(function(){ fallback(); });
+    } else fallback();
+    function fallback(){
+      var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta);
+      ta.select(); try{document.execCommand('copy'); done();}catch(e){} document.body.removeChild(ta);
+    }
+  });
+});
+
+// تبويبات طرق التشغيل
+document.querySelectorAll('.tab').forEach(function(t){
+  t.addEventListener('click', function(){
+    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});
+    document.querySelectorAll('.pane').forEach(function(x){x.classList.remove('active')});
+    t.classList.add('active');
+    document.getElementById(t.dataset.p).classList.add('active');
+  });
+});
+
+// قائمة التحقق + localStorage
+var KEY='ocr_toolkit_start_checklist';
+var boxes=document.querySelectorAll('#checklist .chk');
+try{ var saved=JSON.parse(localStorage.getItem(KEY)||'[]'); }catch(e){ var saved=[]; }
+function render(){
+  var on=0;
+  boxes.forEach(function(el,i){
+    el.classList.toggle('on', !!saved[i]);
+    el.querySelector('.bx').textContent = saved[i]?'✓':'';
+    if(saved[i]) on++;
+  });
+  var pct=Math.round(on/boxes.length*100);
+  document.getElementById('pfill').style.width=pct+'%';
+}
+boxes.forEach(function(el,i){
+  el.addEventListener('click', function(){ saved[i]=!saved[i]; try{localStorage.setItem(KEY,JSON.stringify(saved));}catch(e){} render(); });
+});
+render();
+
+// الرسوم: توزيع الثقة + اللغات (بلا مكتبات)
+function barChart(id, data, colors, unit){
+  var c=document.getElementById(id), dpr=window.devicePixelRatio||1;
+  var W=c.width, H=c.height, pad=44, bw=(W-pad*2)/data.length*0.62;
+  var max=Math.max.apply(null,data.map(function(d){return d[1]}));
+  var ctx=c.getContext('2d'); ctx.clearRect(0,0,W,H);
+  ctx.font='15px Segoe UI, Tahoma, Arial'; ctx.textBaseline='middle';
+  // شبكة
+  ctx.strokeStyle='#2a3552'; ctx.fillStyle='#9aa7c4'; ctx.lineWidth=1;
+  for(var g=0; g<=4; g++){
+    var y=H-pad-(H-pad*2)*g/4;
+    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-pad,y); ctx.stroke();
+  }
+  data.forEach(function(d,i){
+    var h=(H-pad*2)*d[1]/max, x=pad+(W-pad*2)*(i+0.5)/data.length-bw/2, y=H-pad-h;
+    var gr=ctx.createLinearGradient(0,y,0,H-pad); gr.addColorStop(0,colors[0]); gr.addColorStop(1,colors[1]);
+    ctx.fillStyle=gr;
+    var r=Math.min(8,bw/2);
+    ctx.beginPath(); ctx.moveTo(x,H-pad); ctx.lineTo(x,y+r);
+    ctx.quadraticCurveTo(x,y,x+r,y); ctx.lineTo(x+bw-r,y);
+    ctx.quadraticCurveTo(x+bw,y,x+bw,y+r); ctx.lineTo(x+bw,H-pad); ctx.closePath(); ctx.fill();
+    // القيمة فوق العمود
+    ctx.fillStyle='#eef2fb'; ctx.textAlign='center';
+    ctx.fillText(d[1].toLocaleString('en'), x+bw/2, y-14);
+    // التسمية أسفل
+    ctx.fillStyle='#9aa7c4';
+    ctx.fillText(d[0], x+bw/2, H-pad+16);
+  });
+  ctx.strokeStyle='#2a3552'; ctx.beginPath(); ctx.moveTo(pad,H-pad); ctx.lineTo(W-pad,H-pad); ctx.stroke();
+}
+// شريحة الثقة الحقيقية: <0.5 = 34,602 | 0.5–0.8 = 15,135 | ≥0.8 = 5,387
+barChart('cConf',[['أقل من 0.5',34602],['0.5 – 0.8',15135],['0.8 فأكثر',5387]],['#ff6b6b','#7a3d5c'],'قصاصة');
+// اللغات: عربي 53,971 | إنجليزي 1,153 | ألماني 0 (تُصنَّف عند المراجعة)
+barChart('cLang',[['عربي',53971],['إنجليزي',1153],['ألماني',0]],['#4f8cff','#22c58b'],'قصاصة');
+</script>
+</body>
+</html>
