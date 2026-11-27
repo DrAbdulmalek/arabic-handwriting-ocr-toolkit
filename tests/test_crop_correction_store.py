@@ -25,7 +25,7 @@ class CorrectionStoreTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def register(self, crop_id="c1", crop_hash="hash1", quality=GOOD_CROP):
+    def register(self, crop_id="c1", crop_hash="a" * 64, quality=GOOD_CROP):
         register_crop(
             self.db, crop_id=crop_id, crop_hash=crop_hash,
             crop_image_ref="local://crops/c1.png", source_image_id="page-1",
@@ -38,7 +38,7 @@ class CorrectionStoreTests(unittest.TestCase):
 
     def test_only_good_crops_are_pending(self):
         self.register()
-        self.register("bad1", "hash-bad", BAD_CROP)
+        self.register("bad1", "b" * 64, BAD_CROP)
         rows = list_pending(self.db)
         self.assertEqual([r["crop_id"] for r in rows], ["c1"])
 
@@ -61,7 +61,7 @@ class CorrectionStoreTests(unittest.TestCase):
     def test_exact_hash_duplicate_rejected(self):
         self.register()
         with self.assertRaises(DuplicateCropError):
-            self.register("c2", "hash1")
+            self.register("c2", "a" * 64)
 
     def test_training_requires_two_explicit_gates(self):
         self.register()
@@ -75,11 +75,17 @@ class CorrectionStoreTests(unittest.TestCase):
         self.assertEqual(rows[0]["corrected_text"], "النص الصحيح")
 
 
+
+    def test_hash_must_be_sha256_hex(self):
+        with self.assertRaises(ValueError):
+            self.register("invalid-hash", "not-a-sha256")
+        self.assertEqual(list_pending(self.db), [])
+
     def test_expected_text_source_is_required_and_validated(self):
         import sqlite3
         with self.assertRaises(ValueError):
             register_crop(
-                self.db, crop_id="bad-source", crop_hash="hash-source",
+                self.db, crop_id="bad-source", crop_hash="c" * 64,
                 crop_image_ref="local://crops/a.png", source_image_id="page-1",
                 expected_text="نص", expected_text_source="GUESSED",
                 crop_quality=GOOD_CROP, quality_evidence={"reviewer":"test"},
