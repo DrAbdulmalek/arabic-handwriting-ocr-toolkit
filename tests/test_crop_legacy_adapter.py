@@ -49,6 +49,27 @@ class LegacyAdapterTests(unittest.TestCase):
         row = read_legacy_candidates(self.db, allowed_crop_roots=["/safe/root"])[0]
         self.assertEqual(row["path_status"], "OUTSIDE_ALLOWED_ROOTS")
 
+
+    def test_registered_rows_are_excluded_before_limit(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("CREATE TABLE hitl_crop_corrections (crop_id TEXT PRIMARY KEY)")
+            conn.execute("INSERT INTO hitl_crop_corrections(crop_id) VALUES ('legacy:1')")
+            conn.execute(
+                "INSERT INTO crops VALUES (3,'page-b','/data/crops/c.png','جديد',0,0,NULL,1,2,30,40)"
+            )
+            conn.commit()
+        rows = read_legacy_candidates(self.db, limit=1)
+        self.assertEqual([row["crop_id"] for row in rows], ["legacy:3"])
+
+    def test_adapter_connection_rejects_writes(self):
+        from crop_legacy_adapter import _readonly_connection
+        conn = _readonly_connection(self.db)
+        try:
+            with self.assertRaises(sqlite3.OperationalError):
+                conn.execute("UPDATE crops SET label='tampered' WHERE id=1")
+        finally:
+            conn.close()
+
     def test_missing_crops_table_fails_closed(self):
         empty = Path(self.tmp.name) / "empty.sqlite"
         sqlite3.connect(empty).close()
