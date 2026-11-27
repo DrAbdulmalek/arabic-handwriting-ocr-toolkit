@@ -14,6 +14,9 @@ This branch introduces an isolated, local-first correction store for the handwri
 - Exact duplicate image hashes and duplicate crop IDs are rejected.
 - Every correction edit is recorded in an append-only revision table.
 - Importing this module has no side effects. Call `initialize(db_path)` explicitly.
+- Initialization requires an existing database file; it never creates a database on a typo path.
+- Connections are closed deterministically, and the module does not change the database journal mode.
+- Crop-quality decisions and their evidence are immutable after registration.
 
 ## API
 
