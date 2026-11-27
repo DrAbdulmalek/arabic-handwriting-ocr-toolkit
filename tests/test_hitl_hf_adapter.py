@@ -73,6 +73,14 @@ class HfAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_manifest(self.manifest)
 
+
+    def test_rejects_windows_and_backslash_path_traversal(self):
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
+        manifest["rows"][0]["image"] = r"..\\outside.png"
+        self.write_manifest(manifest["rows"])
+        with self.assertRaises(ValueError):
+            validate_manifest(self.manifest)
+
     def test_builds_hf_dataset_locally_when_dependency_is_available(self):
         try:
             from datasets import load_from_disk
