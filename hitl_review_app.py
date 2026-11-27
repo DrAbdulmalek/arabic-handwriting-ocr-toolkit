@@ -19,7 +19,7 @@ from crop_correction_store import (
     BAD_CROP, GOOD_CROP, CORRECTED, VALIDATED, TRAINING_READY,
     initialize, list_pending, register_crop, save_correction,
     validate_correction, mark_training_ready, training_rows,
-    known_crop_hashes, record_legacy_exclusion, DuplicateCropError,
+    known_crop_hashes, record_legacy_exclusion, DuplicateCropError, set_status,
 )
 from crop_legacy_adapter import read_legacy_candidates
 
@@ -104,6 +104,7 @@ class ReviewSession:
                     source_image_id=str(row["source_image_id"]),
                     reason="DUPLICATE_HASH", actor=self.reviewer,
                 )
+                known_hashes.add(crop_hash)
                 continue
             row["crop_hash"] = crop_hash
             row["image_path"] = str(path)
@@ -171,6 +172,9 @@ class ReviewSession:
         return f"حُفظ التصحيح للقصاصة {crop_id}. يلزم تحقق مستقل قبل التدريب."
 
     def skip(self, candidate: dict[str, Any]) -> str:
+        if candidate.get("is_registered"):
+            set_status(self.db_path, str(candidate["crop_id"]), "SKIPPED")
+            return f"تم تخطي {candidate['crop_id']} المسجلة؛ لن تظهر مجدداً في الطابور."
         path = _safe_crop_path(candidate["crop_image_ref"], self.roots)
         crop_hash = _sha256_file(path)
         record_legacy_exclusion(
