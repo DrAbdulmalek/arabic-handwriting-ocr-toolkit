@@ -89,8 +89,6 @@ def read_legacy_candidates(
         result: list[dict[str, object]] = []
         for row in rows:
             crop_id = f"legacy:{row['id']}"
-            if crop_id in hitl_ids:
-                continue
             raw_path = str(row["crop_path"] or "")
             result.append({
                 "crop_id": crop_id,
