@@ -6,20 +6,24 @@ on:
       - "crop_correction_store.py"
       - "crop_legacy_adapter.py"
       - "hitl_review_app.py"
+      - "hitl_export_dataset.py"
       - "tests/test_crop_correction_store.py"
       - "tests/test_crop_legacy_adapter.py"
       - "tests/test_hitl_review_app.py"
+      - "tests/test_hitl_export_dataset.py"
       - ".github/workflows/hitl-tests.yml"
   push:
     branches:
-      - "feat/hitl-review-ui-stage2"
+      - "feat/hitl-export-stage3"
     paths:
       - "crop_correction_store.py"
       - "crop_legacy_adapter.py"
       - "hitl_review_app.py"
+      - "hitl_export_dataset.py"
       - "tests/test_crop_correction_store.py"
       - "tests/test_crop_legacy_adapter.py"
       - "tests/test_hitl_review_app.py"
+      - "tests/test_hitl_export_dataset.py"
       - ".github/workflows/hitl-tests.yml"
 
 permissions:
@@ -39,9 +43,10 @@ jobs:
           python -m pip install "gradio>=4.44,<6"
       - name: Compile HITL modules
         run: |
-          python -m py_compile crop_correction_store.py crop_legacy_adapter.py hitl_review_app.py
+          python -m py_compile crop_correction_store.py crop_legacy_adapter.py hitl_review_app.py hitl_export_dataset.py
       - name: Run isolated HITL unit tests
         run: |
           python -m unittest discover -s tests -p "test_crop_correction_store.py" -v
           python -m unittest discover -s tests -p "test_crop_legacy_adapter.py" -v
           python -m unittest discover -s tests -p "test_hitl_review_app.py" -v
+          python -m unittest discover -s tests -p "test_hitl_export_dataset.py" -v

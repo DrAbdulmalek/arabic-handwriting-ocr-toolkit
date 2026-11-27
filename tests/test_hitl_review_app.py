@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image
+
 from crop_correction_store import initialize, list_pending, training_rows
 from hitl_review_app import ReviewSession, _safe_crop_path, _sha256_file, build_app
 
@@ -23,7 +25,7 @@ class ReviewAppTests(unittest.TestCase):
             """)
         initialize(self.db)
         self.image = self.root / "one.png"
-        self.image.write_bytes(b"synthetic test crop bytes only")
+        Image.new("RGB", (12, 8), "white").save(self.image)
         self.session = ReviewSession(self.db, (self.root,), "test-reviewer")
         self.candidate = {
             "crop_id": "legacy:1",
@@ -51,10 +53,11 @@ class ReviewAppTests(unittest.TestCase):
 
     def test_hash_is_sha256_of_local_bytes(self):
         self.assertEqual(len(_sha256_file(self.image)), 64)
+        self.assertEqual(_safe_crop_path(str(self.image), (self.root,)), self.image.resolve())
 
     def test_crop_path_must_stay_inside_allowed_root(self):
         outside = Path(self.tmp.name) / "outside.png"
-        outside.write_bytes(b"outside")
+        Image.new("RGB", (8, 8), "black").save(outside)
         link = self.root / "escape.png"
         link.symlink_to(outside)
         with self.assertRaises(ValueError):
