@@ -357,6 +357,49 @@ def training_rows(db_path: str | Path, *, batch_id: Optional[str] = None) -> lis
         return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
 
+def record_legacy_exclusion(
+    db_path: str | Path,
+    *,
+    crop_id: str,
+    crop_hash: str,
+    source_image_id: str,
+    reason: str,
+    actor: str = "human",
+) -> None:
+    """Persist a skip/duplicate decision without falsely classifying crop quality."""
+    if not isinstance(crop_hash, str) or re.fullmatch(r"[0-9a-f]{64}", crop_hash) is None:
+        raise ValueError("crop_hash must be a lowercase SHA-256 hex digest")
+    if reason not in {"USER_SKIPPED", "DUPLICATE_HASH", "UNREADABLE_IMAGE"}:
+        raise ValueError("Unsupported legacy exclusion reason")
+    required = (crop_id, source_image_id, actor)
+    if any(not isinstance(value, str) or not value.strip() for value in required):
+        raise ValueError("crop_id, source_image_id, and actor are required")
+    with _connect(db_path) as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO hitl_legacy_exclusions "
+            "(crop_id,crop_hash,source_image_id,reason,actor,created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (crop_id, crop_hash, source_image_id, reason, actor, _utc_now()),
+        )
+
+
+def legacy_exclusion_ids(db_path: str | Path) -> set[str]:
+    with _connect(db_path) as conn:
+        return {row[0] for row in conn.execute(
+            "SELECT crop_id FROM hitl_legacy_exclusions"
+        ).fetchall()}
+
+
+def known_crop_hashes(db_path: str | Path) -> set[str]:
+    """Hashes already registered or explicitly excluded; used for queue dedup."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT crop_hash FROM hitl_crop_corrections "
+            "UNION SELECT crop_hash FROM hitl_legacy_exclusions"
+        ).fetchall()
+        return {row[0] for row in rows}
+
+
 def correction_history(db_path: str | Path, crop_id: str) -> list[dict[str, Any]]:
     with _connect(db_path) as conn:
         return [dict(row) for row in conn.execute(
