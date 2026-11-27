@@ -28,6 +28,20 @@ python hitl_export_dataset.py \
   --out /absolute/path/to/new-hitl-dataset
 ```
 
+For a later correction batch, pass the previous batch's manifest to preserve
+the exact train/val/test assignment of every source page already seen:
+
+```bash
+python hitl_export_dataset.py \
+  --db /absolute/path/to/ocr_data/crops.db \
+  --crop-root /absolute/path/to/ocr_data/crops \
+  --prior-manifest /absolute/path/to/batch-one/manifest.json \
+  --out /absolute/path/to/new-batch-two-dataset
+```
+
+The new manifest records whether splits were newly seeded or reused from a
+prior manifest, plus the prior manifest's SHA-256 fingerprint.
+
 The output contains `images/`, `dataset.csv`, and `manifest.json`. The
 `text` column is the human correction; `expected_text` and
 `expected_text_source` are retained for audit only.
