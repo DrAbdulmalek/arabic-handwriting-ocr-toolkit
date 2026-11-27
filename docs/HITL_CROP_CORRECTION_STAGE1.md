@@ -11,7 +11,7 @@ This branch introduces an isolated, local-first correction store for the handwri
 - Bad crops are rejected from transcription and training.
 - A human correction is not training data until it passes both explicit gates:
   `CORRECTED -> VALIDATED -> TRAINING_READY`.
-- Exact duplicate image hashes and duplicate crop IDs are rejected.
+- A lowercase 64-character SHA-256 digest is required for every crop image; exact duplicate image hashes and duplicate crop IDs are rejected.
 - Every correction edit is recorded in an append-only revision table.
 - Importing this module has no side effects. Call `initialize(db_path)` explicitly.
 - Initialization requires an existing database file; it never creates a database on a typo path.
