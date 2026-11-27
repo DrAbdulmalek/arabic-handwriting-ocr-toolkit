@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from crop_correction_store import initialize, list_pending, training_rows
-from hitl_review_app import ReviewSession, _safe_crop_path, _sha256_file
+from hitl_review_app import ReviewSession, _safe_crop_path, _sha256_file, build_app
 
 
 class ReviewAppTests(unittest.TestCase):
@@ -15,7 +15,12 @@ class ReviewAppTests(unittest.TestCase):
         self.root.mkdir()
         self.db = Path(self.tmp.name) / "crops.sqlite"
         with sqlite3.connect(self.db) as conn:
-            conn.execute("CREATE TABLE crops (id INTEGER PRIMARY KEY, label TEXT)")
+            conn.execute("""
+                CREATE TABLE crops (
+                    id INTEGER PRIMARY KEY, page_name TEXT, crop_path TEXT,
+                    label TEXT, ignored INTEGER DEFAULT 0, verified INTEGER DEFAULT 0
+                )
+            """)
         initialize(self.db)
         self.image = self.root / "one.png"
         self.image.write_bytes(b"synthetic test crop bytes only")
@@ -34,6 +39,15 @@ class ReviewAppTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+
+    def test_gradio_app_builds_without_network_share(self):
+        try:
+            import gradio
+        except ImportError:
+            self.skipTest("Gradio is installed in the dedicated CI smoke-test step")
+        app = build_app(self.db, (self.root,), "test-reviewer")
+        self.assertIsNotNone(app)
 
     def test_hash_is_sha256_of_local_bytes(self):
         self.assertEqual(len(_sha256_file(self.image)), 64)
