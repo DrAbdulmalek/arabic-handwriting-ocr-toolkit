@@ -18,7 +18,7 @@ on:
       - ".github/workflows/hitl-tests.yml"
   push:
     branches:
-      - "feat/hitl-batch2-stability-stage5"
+      - "feat/hitl-persistent-skip-dedup-stage6"
     paths:
       - "crop_correction_store.py"
       - "crop_legacy_adapter.py"
