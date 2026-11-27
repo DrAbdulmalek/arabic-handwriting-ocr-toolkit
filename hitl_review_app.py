@@ -57,11 +57,18 @@ def _sha256_file(path: Path) -> str:
 class ReviewSession:
     """Small per-process queue; all persistent decisions live in SQLite."""
 
-    def __init__(self, db_path: Path, roots: tuple[Path, ...], reviewer: str):
+    def __init__(
+        self, db_path: Path, roots: tuple[Path, ...], reviewer: str,
+        crop_config_version: str = "legacy-unknown",
+        model_version: str = "legacy-unknown",
+        batch_id: str | None = None,
+    ):
         self.db_path = db_path
         self.roots = roots
         self.reviewer = reviewer
-        self.batch_id = "legacy-review-" + uuid.uuid4().hex[:12]
+        self.crop_config_version = crop_config_version
+        self.model_version = model_version
+        self.batch_id = batch_id or ("legacy-review-" + uuid.uuid4().hex[:12])
 
     def next_candidate(self) -> dict[str, Any] | None:
         # Resume interrupted GOOD_CROP entries before importing another legacy row.
@@ -125,8 +132,8 @@ class ReviewSession:
                     "decision": quality,
                     "checks": ["human_visual_inspection"],
                 },
-                crop_config_version="legacy-unknown",
-                model_version="legacy-unknown",
+                crop_config_version=self.crop_config_version,
+                model_version=self.model_version,
                 batch_id=self.batch_id,
                 bounding_box=box or None,
                 confidence=candidate.get("legacy_confidence"),
@@ -155,11 +162,15 @@ class ReviewSession:
         return f"العينات المعتمدة للتدريب المحلي: {len(rows)}"
 
 
-def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
+def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str,
+              crop_config_version="legacy-unknown", model_version="legacy-unknown",
+              batch_id=None):
     import gradio as gr
 
     initialize(db_path)
-    session = ReviewSession(db_path, roots, reviewer)
+    session = ReviewSession(
+        db_path, roots, reviewer, crop_config_version, model_version, batch_id
+    )
     first = session.next_candidate()
 
     def render(candidate):
@@ -264,6 +275,10 @@ def main():
     parser.add_argument("--crop-root", action="append", required=True,
                         help="مجلد مسموح لصور القصاصات؛ يمكن تكراره")
     parser.add_argument("--reviewer", required=True, help="معرّف المراجع المحلي")
+    parser.add_argument("--crop-config-version", default="legacy-unknown")
+    parser.add_argument("--model-version", default="legacy-unknown")
+    parser.add_argument("--batch-id", default=None,
+                        help="معرّف دفعة ثابت؛ إن تُرك فارغاً يُنشأ معرّف محلي تلقائي")
     parser.add_argument("--host", default="127.0.0.1",
                         help="افتراضياً loopback فقط؛ لا تستخدم 0.0.0.0 على شبكة غير موثوقة")
     parser.add_argument("--port", type=int, default=7864)
@@ -272,7 +287,10 @@ def main():
     if not db.is_file():
         parser.error("قاعدة البيانات غير موجودة؛ لن تُنشأ قاعدة جديدة.")
     roots = tuple(Path(p).expanduser().resolve(strict=True) for p in args.crop_root)
-    demo = build_app(db, roots, args.reviewer)
+    demo = build_app(
+        db, roots, args.reviewer, args.crop_config_version,
+        args.model_version, args.batch_id,
+    )
     demo.queue(max_size=8).launch(
         server_name=args.host, server_port=args.port,
         share=False, show_error=False, inbrowser=False,
