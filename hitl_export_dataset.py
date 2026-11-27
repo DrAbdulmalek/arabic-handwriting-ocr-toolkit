@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from PIL import Image
+
 from crop_correction_store import training_rows
 
 
@@ -27,6 +29,11 @@ def _safe_file(raw_path: str, roots: tuple[Path, ...]) -> Path:
     allowed = tuple(root.expanduser().resolve(strict=True) for root in roots)
     if not any(path == root or root in path.parents for root in allowed):
         raise ValueError(f"Training image is outside allowed crop roots: {path}")
+    try:
+        with Image.open(path) as image:
+            image.verify()
+    except Exception as exc:
+        raise ValueError(f"Training crop is not a valid image: {path}") from exc
     return path
 
 
