@@ -62,6 +62,8 @@ Open `http://127.0.0.1:7864` on the same computer.
 - BAD_CROP is recorded as rejected and cannot receive transcription.
 - GOOD_CROP requires a non-empty human transcription.
 - A saved correction remains CORRECTED until the independent validation action.
+- The persistent "skip permanently" action stores a separate exclusion record; it does not pretend that crop quality was GOOD or BAD.
+- Exact image hashes already registered or excluded are suppressed from later review candidates.
 - The separate training-ready action is required after validation.
 - Re-editing a correction resets its status to CORRECTED.
 
