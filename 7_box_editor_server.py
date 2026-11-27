@@ -1470,6 +1470,17 @@ def main():
     ALLOWED_ORIGINS = {f"http://127.0.0.1:{args.port}", f"http://localhost:{args.port}"}
     if args.host == "0.0.0.0":
         ALLOWED_ORIGINS |= {u.rstrip("/") for u in lan_urls(args.port)}
+    configured_origins = [
+        item.strip().rstrip("/")
+        for item in os.environ.get("BOX_EDITOR_ALLOWED_ORIGINS", "").split(",")
+        if item.strip()
+    ]
+    for configured in configured_origins:
+        parsed = urlparse(configured)
+        if (parsed.scheme not in {"http", "https"} or not parsed.netloc
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+            sys.exit("قيمة BOX_EDITOR_ALLOWED_ORIGINS غير صالحة؛ استخدم origin كاملاً فقط")
+        ALLOWED_ORIGINS.add(f"{parsed.scheme}://{parsed.netloc}")
     # المصادقة مفعّلة دائماً، حتى عند الاستماع على loopback؛ يمنع ذلك تعريض API
     # بلا حماية إذا وُضع reverse proxy/tunnel أمام الخادم لاحقاً.
     AUTH_TOKEN = secrets.token_urlsafe(32)
