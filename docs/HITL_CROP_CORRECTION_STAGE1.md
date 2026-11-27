@@ -6,7 +6,7 @@ This branch introduces an isolated, local-first correction store for the handwri
 
 - Existing `crops` table is not altered.
 - No image bytes are read by this module; `crop_image_ref` is a local reference.
-- Original OCR prediction and crop identity are immutable.
+- Original text and crop identity are immutable; `expected_text_source` records whether the expected text came from original OCR, human labeling, automatic correction, or an unverified legacy label.
 - Only a crop explicitly registered as `GOOD_CROP` can be transcribed.
 - Bad crops are rejected from transcription and training.
 - A human correction is not training data until it passes both explicit gates:
@@ -34,6 +34,7 @@ register_crop(
     crop_image_ref="/local/path/to/crop.png",
     source_image_id="stable-source-page-id",
     expected_text="original OCR prediction",
+    expected_text_source="ORIGINAL_OCR_OUTPUT",
     crop_quality="GOOD_CROP",
     quality_evidence={"checks": ["inside_page", "no_clipped_glyphs"]},
     crop_config_version="crop-v1",
