@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_ALLOWED_EXPECTED_TEXT_SOURCES = {
+    "ORIGINAL_OCR_OUTPUT", "HUMAN_LABEL", "AUTO_CORRECTION",
+    "LEGACY_LABEL_UNVERIFIED",
+}
 GOOD_CROP = "GOOD_CROP"
 BAD_CROP = "BAD_CROP"
 PENDING = "PENDING"
@@ -83,6 +87,7 @@ def initialize(db_path: str | Path) -> None:
                 crop_image_ref TEXT NOT NULL,
                 source_image_id TEXT NOT NULL,
                 expected_text TEXT NOT NULL,
+                expected_text_source TEXT NOT NULL DEFAULT 'LEGACY_LABEL_UNVERIFIED',
                 corrected_text TEXT,
                 crop_quality TEXT NOT NULL CHECK(crop_quality IN ('GOOD_CROP','BAD_CROP')),
                 quality_evidence TEXT NOT NULL,
@@ -129,7 +134,7 @@ def initialize(db_path: str | Path) -> None:
 
             CREATE TRIGGER IF NOT EXISTS hitl_identity_immutable
             BEFORE UPDATE OF crop_id, crop_hash, crop_image_ref, source_image_id,
-                             expected_text, crop_quality, quality_evidence,
+                             expected_text, expected_text_source, crop_quality, quality_evidence,
                              bounding_box_json, crop_config_version, model_version, batch_id
             ON hitl_crop_corrections
             BEGIN
@@ -137,6 +142,12 @@ def initialize(db_path: str | Path) -> None:
             END;
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(hitl_crop_corrections)")}
+        if "expected_text_source" not in columns:
+            conn.execute(
+                "ALTER TABLE hitl_crop_corrections ADD COLUMN expected_text_source TEXT NOT NULL "
+                "DEFAULT 'LEGACY_LABEL_UNVERIFIED'"
+            )
         existing = conn.execute(
             "SELECT value FROM hitl_schema_meta WHERE key='schema_version'"
         ).fetchone()
@@ -157,6 +168,7 @@ def register_crop(
     crop_image_ref: str,
     source_image_id: str,
     expected_text: str,
+    expected_text_source: str,
     crop_quality: str,
     quality_evidence: Mapping[str, Any],
     crop_config_version: str,
@@ -166,11 +178,14 @@ def register_crop(
     confidence: Optional[float] = None,
 ) -> None:
     """Register one crop. Only GOOD_CROP is eligible for human transcription."""
+    if expected_text_source not in _ALLOWED_EXPECTED_TEXT_SOURCES:
+        raise ValueError(f"Unsupported expected_text_source: {expected_text_source}")
     if crop_quality not in _ALLOWED_QUALITY:
         raise ValueError(f"Unsupported crop_quality: {crop_quality}")
     required = {
         "crop_id": crop_id, "crop_hash": crop_hash, "crop_image_ref": crop_image_ref,
         "source_image_id": source_image_id, "expected_text": expected_text,
+        "expected_text_source": expected_text_source,
         "crop_config_version": crop_config_version, "model_version": model_version,
         "batch_id": batch_id,
     }
@@ -188,12 +203,12 @@ def register_crop(
         with _connect(db_path) as conn:
             conn.execute(
                 """INSERT INTO hitl_crop_corrections
-                (crop_id,crop_hash,crop_image_ref,source_image_id,expected_text,
+                (crop_id,crop_hash,crop_image_ref,source_image_id,expected_text,expected_text_source,
                  crop_quality,quality_evidence,correction_status,bounding_box_json,
                  crop_config_version,model_version,confidence,batch_id,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    crop_id, crop_hash, crop_image_ref, source_image_id, expected_text,
+                    crop_id, crop_hash, crop_image_ref, source_image_id, expected_text, expected_text_source,
                     crop_quality, json.dumps(dict(quality_evidence), ensure_ascii=False, sort_keys=True),
                     status, json.dumps(dict(bounding_box), ensure_ascii=False, sort_keys=True)
                     if bounding_box is not None else None,
@@ -210,7 +225,7 @@ def list_pending(db_path: str | Path, *, batch_id: Optional[str] = None, limit: 
     """Return only quality-approved crops not previously corrected/rejected."""
     if limit < 1 or limit > 10000:
         raise ValueError("limit must be between 1 and 10000")
-    sql = """SELECT crop_id,crop_hash,crop_image_ref,source_image_id,expected_text,
+    sql = """SELECT crop_id,crop_hash,crop_image_ref,source_image_id,expected_text,expected_text_source,
                     crop_quality,correction_status,bounding_box_json,crop_config_version,
                     model_version,confidence,batch_id
              FROM hitl_crop_corrections
