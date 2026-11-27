@@ -76,16 +76,26 @@ class HitlExportTests(unittest.TestCase):
 
     def test_outside_root_fails_closed(self):
         outside = Path(self.tmp.name) / "outside.png"
-        outside.write_bytes(b"outside")
-        # Replace one registered reference only in this isolated test DB.
-        with sqlite3.connect(self.db) as conn:
-            conn.execute(
-                "UPDATE hitl_crop_corrections SET crop_image_ref=? WHERE crop_id='crop-0'",
-                (str(outside),),
-            )
+        payload = b"outside"
+        outside.write_bytes(payload)
+        db2 = Path(self.tmp.name) / "outside.sqlite"
+        with sqlite3.connect(db2):
+            pass
+        initialize(db2)
+        register_crop(
+            db2, crop_id="outside", crop_hash=hashlib.sha256(payload).hexdigest(),
+            crop_image_ref=str(outside), source_image_id="page-0",
+            expected_text="OCR", expected_text_source="ORIGINAL_OCR_OUTPUT",
+            crop_quality="GOOD_CROP",
+            quality_evidence={"reviewer":"test","decision":"GOOD_CROP","checks":["visual"]},
+            crop_config_version="test", model_version="test", batch_id="batch-test",
+        )
+        save_correction(db2, "outside", "تصحيح")
+        validate_correction(db2, "outside")
+        mark_training_ready(db2, "outside")
         out = Path(self.tmp.name) / "outside-export"
         with self.assertRaises(ValueError):
-            export_training_dataset(self.db, out, allowed_crop_roots=[self.root])
+            export_training_dataset(db2, out, allowed_crop_roots=[self.root])
         self.assertFalse(out.exists())
 
     def test_requires_at_least_three_source_pages(self):
