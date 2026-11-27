@@ -7,6 +7,7 @@ from pathlib import Path
 
 from hitl_training_guard import (
     verify_hitl_dataset, training_metrics_report, require_new_output_paths,
+    require_separate_training_output,
 )
 
 
@@ -86,6 +87,13 @@ class TrainingGuardTests(unittest.TestCase):
         )
         self.assertEqual(report["baseline_status"], "NOT_MEASURED_NO_INIT_MODEL")
         self.assertIsNone(report["cer_delta_final_minus_baseline"])
+
+
+    def test_training_output_must_be_separate_from_dataset(self):
+        with self.assertRaises(ValueError):
+            require_separate_training_output(self.root, self.root / "nested-model")
+        with self.assertRaises(ValueError):
+            require_separate_training_output(self.root, self.root.parent)
 
     def test_training_outputs_must_be_new(self):
         model = Path(self.tmp.name) / "model"
