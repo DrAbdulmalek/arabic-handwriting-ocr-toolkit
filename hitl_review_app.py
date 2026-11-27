@@ -210,15 +210,15 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
                 except Exception as exc:
                     retry = session.next_candidate()
                     img, exp, cid, src, state, warn = render(retry or candidate)
-                    return img, exp, cid, src, state, warn, f"لم يُحفظ القرار: {exc}", session.summary(), reviewed_id
+                    return img, exp, cid, src, state, warn, f"لم يُحفظ القرار: {exc}", session.summary(), reviewed_id, text_value
             nxt = session.next_candidate()
             img, exp, cid, src, state, warn = render(nxt)
-            return img, exp, cid, src, state, warn, message, session.summary(), reviewed_id
+            return img, exp, cid, src, state, warn, message, session.summary(), reviewed_id, ""
 
         good.click(
             lambda c, s, t, last: move(c, GOOD_CROP, s, t, last),
             inputs=[current, source, corrected, last_saved_id],
-            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id],
+            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id, corrected],
         )
         bad.click(
             lambda c, s, last: move(c, BAD_CROP, s, "", last),
@@ -239,8 +239,8 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
             inputs=[last_saved_id], outputs=[status],
         )
         demo.load(
-            lambda: (*render(first), session.summary()),
-            outputs=[image, expected, crop_id, source, current, warning, summary],
+            lambda: (*render(first), session.summary(), ""),
+            outputs=[image, expected, crop_id, source, current, warning, summary, corrected],
         )
     return demo
 
