@@ -169,11 +169,12 @@ def main():
     if not dataset_path.exists():
         sys.exit(f"❌ مجموعة البيانات {dataset_path} غير موجودة.")
     dataset_manifest_sha256 = None
+    hitl_metadata = None
     metadata_path = dataset_path / "hitl_dataset_metadata.json"
     if args.require_hitl or metadata_path.exists():
         try:
-            verified = verify_hitl_dataset(dataset_path)
-            dataset_manifest_sha256 = verified["source_manifest_sha256"]
+            hitl_metadata = verify_hitl_dataset(dataset_path)
+            dataset_manifest_sha256 = hitl_metadata["source_manifest_sha256"]
         except Exception as exc:
             sys.exit(f"❌ فشل التحقق من مصدر HITL: {exc}")
     if metadata_path.exists() and args.push_repo:
@@ -201,6 +202,11 @@ def main():
         print("⚠️ لا توجد GPU — التدريب سيكون بطيئًا جدًا (استخدم Colab مع T4).")
 
     ds = load_from_disk(args.dataset)
+    if hitl_metadata and any(
+        split not in ds or len(ds[split]) != hitl_metadata["split_counts"][split]
+        for split in ("train", "val", "test")
+    ):
+        sys.exit("❌ HF DatasetDict split counts do not match the verified HITL manifest.")
     if args.require_hitl and not all(
         split in ds and len(ds[split]) > 0 for split in ("train", "val", "test")
     ):
