@@ -228,7 +228,7 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
         next_btn.click(
             lambda c, last: move(c, last_id=last),
             inputs=[current, last_saved_id],
-            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id],
+            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id, corrected],
         )
         validate_btn.click(
             lambda cid: session.validate(cid) if cid else "لا توجد قصاصة محفوظة للتحقق.",
