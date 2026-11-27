@@ -28,7 +28,10 @@ import torch
 import jiwer
 
 import toolkit_utils as tu
-from hitl_training_guard import verify_hitl_dataset, training_metrics_report, require_new_output_paths
+from hitl_training_guard import (
+    verify_hitl_dataset, training_metrics_report, require_new_output_paths,
+    require_separate_training_output,
+)
 
 from config import (
     DATASET_DIR, TRAIN_OUTPUT_DIR, ENCODER_ID, DECODER_ID, ARABIC_DECODER_ID,
@@ -181,7 +184,11 @@ def main():
         sys.exit("❌ رفع نموذج مشتق من Dataset HITL معطل في وضع الخصوصية المحلي.")
     args.dataset = str(dataset_path)
     args.out = str(Path(args.out).expanduser().resolve(strict=False))
-    require_new_output_paths(args.out, args.out + "_checkpoints")
+    try:
+        require_separate_training_output(args.dataset, args.out)
+        require_new_output_paths(args.out, args.out + "_checkpoints")
+    except (ValueError, FileExistsError) as exc:
+        sys.exit(f"❌ مسار الإخراج غير آمن: {exc}")
 
     from datasets import load_from_disk, Image as HFImage
     from transformers import (
