@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
@@ -44,20 +45,31 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _connect(db_path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path), timeout=10.0)
+@contextmanager
+def _connect(db_path: str | Path):
+    """Open an existing database and always close the connection.
+
+    Deliberately refuses to create a database on a misspelled path.
+    """
+    path = Path(db_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Refusing to create or open a missing database: {path}")
+    conn = sqlite3.connect(str(path), timeout=10.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def initialize(db_path: str | Path) -> None:
-    """Create HITL tables in an existing or new SQLite DB; legacy tables untouched."""
+    """Create HITL tables in an existing SQLite DB; never create or reconfigure a DB."""
     path = Path(db_path)
-    if not path.parent.exists():
-        raise FileNotFoundError(f"Database parent does not exist: {path.parent}")
+    if not path.is_file():
+        raise FileNotFoundError(f"Expected an existing SQLite database: {path}")
     with _connect(path) as conn:
-        conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS hitl_schema_meta (
@@ -117,8 +129,8 @@ def initialize(db_path: str | Path) -> None:
 
             CREATE TRIGGER IF NOT EXISTS hitl_identity_immutable
             BEFORE UPDATE OF crop_id, crop_hash, crop_image_ref, source_image_id,
-                             expected_text, bounding_box_json, crop_config_version,
-                             model_version, batch_id
+                             expected_text, crop_quality, quality_evidence,
+                             bounding_box_json, crop_config_version, model_version, batch_id
             ON hitl_crop_corrections
             BEGIN
                 SELECT RAISE(ABORT, 'HITL crop identity and original prediction are immutable');
