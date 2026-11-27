@@ -83,6 +83,17 @@ class TestHTTPAccessGuard(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIsNone(headers.get("Set-Cookie"))
 
+    def test_explicitly_configured_proxy_origin_is_allowed(self):
+        srv.ALLOWED_ORIGINS.add("https://colab-proxy.example")
+        status, _, _ = self.request(
+            "GET", "/api/health",
+            headers={
+                "Origin": "https://colab-proxy.example",
+                "X-Auth-Token": "integration-test-token",
+            },
+        )
+        self.assertEqual(status, 200)
+
     def test_wrong_origin_is_rejected_even_with_valid_token(self):
         status, _, _ = self.request(
             "GET", "/api/health",
@@ -149,13 +160,16 @@ class TestHTTPAccessGuard(unittest.TestCase):
         mutation.assert_not_called()
 
     def test_post_requires_content_length(self):
-        status, _, _ = self.request(
-            "POST", "/api/update",
-            headers={
-                "Content-Type": "application/json",
-                "X-Auth-Token": "integration-test-token",
-            },
-        )
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=4)
+        conn.putrequest("POST", "/api/update")
+        conn.putheader("Connection", "close")
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("X-Auth-Token", "integration-test-token")
+        conn.endheaders()
+        response = conn.getresponse()
+        response.read()
+        status = response.status
+        conn.close()
         self.assertEqual(status, 411)
 
     def test_post_rejects_transfer_encoding(self):
@@ -197,12 +211,12 @@ class TestHTTPAccessGuard(unittest.TestCase):
     def test_export_filename_is_sanitized_in_real_response_header(self):
         malicious = "report" + '"' + chr(13) + chr(10) + "Set-Cookie: injected=1"
         path = "/api/export_page?name=" + quote(malicious, safe="")
-        with patch.object(srv, "export_page", return_value=(b"safe", "text/plain")), \\
-             patch.object(srv, "app_log"):
-            status, headers, _ = self.request(
-                "GET", path,
-                headers={"X-Auth-Token": "integration-test-token"},
-            )
+        with patch.object(srv, "export_page", return_value=(b"safe", "text/plain")):
+            with patch.object(srv, "app_log"):
+                status, headers, _ = self.request(
+                    "GET", path,
+                    headers={"X-Auth-Token": "integration-test-token"},
+                )
         self.assertEqual(status, 200)
         disposition = headers.get("Content-Disposition", "")
         self.assertNotIn(chr(13), disposition)
