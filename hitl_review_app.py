@@ -157,7 +157,7 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
 
     def render(candidate):
         if candidate is None:
-            return None, "", "", None, "لا توجد قصاصات أخرى مؤهلة للعرض ضمن المسارات المحددة."
+            return None, "", "", "LEGACY_LABEL_UNVERIFIED", None, "لا توجد قصاصات أخرى مؤهلة للعرض ضمن المسارات المحددة."
         warning = (
             "⚠️ النص المتوقع قديم ومجهول المصدر؛ لا تفترض أنه خرج OCR الأصلي."
             if candidate.get("expected_text_source") == "LEGACY_LABEL_UNVERIFIED"
@@ -174,8 +174,7 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
 
     with gr.Blocks(title="HITL — تصحيح قصاصات OCR") as demo:
         gr.Markdown(
-            "## مراجعة القصاصات وتصحيح النص
-"
+            "## مراجعة القصاصات وتصحيح النص\\n"
             "تعمل هذه الواجهة محلياً. لا ترفع الصور أو قاعدة البيانات أو التصحيحات إلى أي خدمة."
         )
         image = gr.Image(label="صورة القصاصة", type="filepath", interactive=False, height=260)
@@ -217,19 +216,19 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
             return img, exp, cid, src, state, warn, message, session.summary(), reviewed_id
 
         good.click(
-            lambda c, s, t: move(c, GOOD_CROP, s, t),
-            inputs=[current, source, corrected],
+            lambda c, s, t, last: move(c, GOOD_CROP, s, t, last),
+            inputs=[current, source, corrected, last_saved_id],
             outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id],
         )
         bad.click(
-            lambda c, s: move(c, BAD_CROP, s, ""),
-            inputs=[current, source],
-            outputs=[image, expected, crop_id, current, warning, status, summary],
+            lambda c, s, last: move(c, BAD_CROP, s, "", last),
+            inputs=[current, source, last_saved_id],
+            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id],
         )
         next_btn.click(
-            lambda c: move(c),
-            inputs=[current],
-            outputs=[image, expected, crop_id, current, warning, status, summary],
+            lambda c, last: move(c, last_id=last),
+            inputs=[current, last_saved_id],
+            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id],
         )
         validate_btn.click(
             lambda cid: session.validate(cid) if cid else "لا توجد قصاصة محفوظة للتحقق.",
