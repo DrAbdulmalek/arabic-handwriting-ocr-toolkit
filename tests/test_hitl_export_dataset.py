@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image
+
 from crop_correction_store import (
     initialize, register_crop, save_correction, validate_correction,
     mark_training_ready,
@@ -25,8 +27,8 @@ class HitlExportTests(unittest.TestCase):
         self.files = []
         for i in range(3):
             path = self.root / f"crop-{i}.png"
-            payload = f"synthetic-image-{i}".encode()
-            path.write_bytes(payload)
+            Image.new("RGB", (12, 8), (i * 40, 80, 120)).save(path)
+            payload = path.read_bytes()
             self.files.append(path)
             crop_id = f"crop-{i}"
             register_crop(
@@ -72,7 +74,7 @@ class HitlExportTests(unittest.TestCase):
         self.assertEqual(sentinel.read_text(), "do not delete")
 
     def test_hash_mismatch_fails_before_output_creation(self):
-        self.files[0].write_bytes(b"tampered")
+        Image.new("RGB", (12, 8), "black").save(self.files[0])
         out = Path(self.tmp.name) / "bad-export"
         with self.assertRaises(ValueError):
             export_training_dataset(self.db, out, allowed_crop_roots=[self.root])
@@ -80,8 +82,8 @@ class HitlExportTests(unittest.TestCase):
 
     def test_outside_root_fails_closed(self):
         outside = Path(self.tmp.name) / "outside.png"
-        payload = b"outside"
-        outside.write_bytes(payload)
+        Image.new("RGB", (8, 8), "black").save(outside)
+        payload = outside.read_bytes()
         db2 = Path(self.tmp.name) / "outside.sqlite"
         with sqlite3.connect(db2):
             pass
@@ -115,9 +117,9 @@ class HitlExportTests(unittest.TestCase):
         with sqlite3.connect(db2):
             pass
         initialize(db2)
-        payload = b"single"
         path = self.root / "single.png"
-        path.write_bytes(payload)
+        Image.new("RGB", (8, 8), "white").save(path)
+        payload = path.read_bytes()
         register_crop(
             db2, crop_id="single", crop_hash=hashlib.sha256(payload).hexdigest(),
             crop_image_ref=str(path), source_image_id="one-page",
