@@ -97,3 +97,10 @@ def require_new_output_paths(model_dir: str | Path, checkpoints_dir: str | Path)
         path = Path(value).expanduser().resolve(strict=False)
         if path.exists():
             raise FileExistsError(f"Refusing to overwrite existing training output: {path}")
+
+
+def require_separate_training_output(dataset_dir: str | Path, output_dir: str | Path) -> None:
+    dataset = Path(dataset_dir).expanduser().resolve(strict=True)
+    output = Path(output_dir).expanduser().resolve(strict=False)
+    if output == dataset or dataset in output.parents or output in dataset.parents:
+        raise ValueError("Training output must be separate from the source Dataset directory")
