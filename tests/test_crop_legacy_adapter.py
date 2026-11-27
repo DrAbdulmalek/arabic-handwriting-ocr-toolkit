@@ -70,6 +70,23 @@ class LegacyAdapterTests(unittest.TestCase):
         finally:
             conn.close()
 
+
+    def test_persistently_skipped_legacy_rows_are_not_returned(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("""
+                CREATE TABLE hitl_legacy_exclusions (
+                    crop_id TEXT PRIMARY KEY, crop_hash TEXT NOT NULL,
+                    source_image_id TEXT NOT NULL, reason TEXT NOT NULL,
+                    actor TEXT NOT NULL, created_at TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                "INSERT INTO hitl_legacy_exclusions VALUES (?,?,?,?,?,?)",
+                ("legacy:1", "a" * 64, "page-a", "USER_SKIPPED", "tester", "now"),
+            )
+            conn.commit()
+        self.assertEqual(read_legacy_candidates(self.db), [])
+
     def test_missing_crops_table_fails_closed(self):
         empty = Path(self.tmp.name) / "empty.sqlite"
         sqlite3.connect(empty).close()

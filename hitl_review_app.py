@@ -19,6 +19,7 @@ from crop_correction_store import (
     BAD_CROP, GOOD_CROP, CORRECTED, VALIDATED, TRAINING_READY,
     initialize, list_pending, register_crop, save_correction,
     validate_correction, mark_training_ready, training_rows,
+    known_crop_hashes, record_legacy_exclusion, DuplicateCropError, set_status,
 )
 from crop_legacy_adapter import read_legacy_candidates
 
@@ -85,6 +86,7 @@ class ReviewSession:
         candidates = read_legacy_candidates(
             self.db_path, allowed_crop_roots=self.roots, limit=10000
         )
+        known_hashes = known_crop_hashes(self.db_path)
         for row in candidates:
             if row["path_status"] != "PRESENT" or not row["expected_text"]:
                 continue
@@ -95,6 +97,16 @@ class ReviewSession:
             except (OSError, ValueError):
                 continue
             row = dict(row)
+            crop_hash = _sha256_file(path)
+            if crop_hash in known_hashes:
+                record_legacy_exclusion(
+                    self.db_path, crop_id=str(row["crop_id"]), crop_hash=crop_hash,
+                    source_image_id=str(row["source_image_id"]),
+                    reason="DUPLICATE_HASH", actor=self.reviewer,
+                )
+                known_hashes.add(crop_hash)
+                continue
+            row["crop_hash"] = crop_hash
             row["image_path"] = str(path)
             row["is_registered"] = False
             return row
@@ -115,29 +127,39 @@ class ReviewSession:
             raise ValueError("أدخل النص الصحيح قبل تسجيل القصاصة الجيدة")
         path = _safe_crop_path(candidate["crop_image_ref"], self.roots)
         crop_hash = _sha256_file(path)
+        if candidate.get("crop_hash") and candidate["crop_hash"] != crop_hash:
+            raise ValueError("Crop image changed after it was loaded; reload before saving")
         crop_id = str(candidate["crop_id"])
         if not candidate.get("is_registered"):
             box = candidate.get("bounding_box") or {}
-            register_crop(
-                self.db_path,
-                crop_id=crop_id,
-                crop_hash=crop_hash,
-                crop_image_ref=str(path),
-                source_image_id=str(candidate["source_image_id"]),
-                expected_text=str(candidate["expected_text"]),
-                expected_text_source=source,
-                crop_quality=quality,
-                quality_evidence={
-                    "reviewer": self.reviewer,
-                    "decision": quality,
-                    "checks": ["human_visual_inspection"],
-                },
-                crop_config_version=self.crop_config_version,
-                model_version=self.model_version,
-                batch_id=self.batch_id,
-                bounding_box=box or None,
-                confidence=candidate.get("legacy_confidence"),
-            )
+            try:
+                register_crop(
+                    self.db_path,
+                    crop_id=crop_id,
+                    crop_hash=crop_hash,
+                    crop_image_ref=str(path),
+                    source_image_id=str(candidate["source_image_id"]),
+                    expected_text=str(candidate["expected_text"]),
+                    expected_text_source=source,
+                    crop_quality=quality,
+                    quality_evidence={
+                        "reviewer": self.reviewer,
+                        "decision": quality,
+                        "checks": ["human_visual_inspection"],
+                    },
+                    crop_config_version=self.crop_config_version,
+                    model_version=self.model_version,
+                    batch_id=self.batch_id,
+                    bounding_box=box or None,
+                    confidence=candidate.get("legacy_confidence"),
+                )
+            except DuplicateCropError:
+                record_legacy_exclusion(
+                    self.db_path, crop_id=crop_id, crop_hash=crop_hash,
+                    source_image_id=str(candidate["source_image_id"]),
+                    reason="DUPLICATE_HASH", actor=self.reviewer,
+                )
+                return f"تم استبعاد {crop_id}: صورة القصاصة مكررة ببصمة مطابقة."
         elif quality != GOOD_CROP:
             raise ValueError("A registered GOOD_CROP cannot be changed to BAD_CROP")
 
@@ -148,6 +170,22 @@ class ReviewSession:
             actor=self.reviewer, reason="human-in-the-loop review",
         )
         return f"حُفظ التصحيح للقصاصة {crop_id}. يلزم تحقق مستقل قبل التدريب."
+
+    def skip(self, candidate: dict[str, Any]) -> str:
+        if candidate.get("is_registered"):
+            set_status(self.db_path, str(candidate["crop_id"]), "SKIPPED")
+            return f"تم تخطي {candidate['crop_id']} المسجلة؛ لن تظهر مجدداً في الطابور."
+        path = _safe_crop_path(candidate["crop_image_ref"], self.roots)
+        crop_hash = _sha256_file(path)
+        record_legacy_exclusion(
+            self.db_path,
+            crop_id=str(candidate["crop_id"]),
+            crop_hash=crop_hash,
+            source_image_id=str(candidate["source_image_id"]),
+            reason="USER_SKIPPED",
+            actor=self.reviewer,
+        )
+        return f"تم حفظ تخطي {candidate['crop_id']}؛ لن تظهر مجدداً في الطابور."
 
     def validate(self, crop_id: str) -> str:
         validate_correction(self.db_path, crop_id)
@@ -211,6 +249,7 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str,
         with gr.Row():
             good = gr.Button("قصاصة جيدة — حفظ التصحيح", variant="primary")
             bad = gr.Button("قصاصة سيئة — استبعاد")
+            skip_btn = gr.Button("تخطي دائم")
             next_btn = gr.Button("التالي")
         status = gr.Markdown("")
         with gr.Row():
@@ -218,9 +257,15 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str,
             ready_btn = gr.Button("اعتمادها للتدريب المحلي")
         summary = gr.Markdown(session.summary())
 
-        def move(candidate, quality=None, provenance="LEGACY_LABEL_UNVERIFIED", text_value="", last_id=None):
+        def move(candidate, quality=None, provenance="LEGACY_LABEL_UNVERIFIED", text_value="", last_id=None, skip=False):
             message = ""
             reviewed_id = last_id
+            if candidate is not None and skip:
+                try:
+                    message = session.skip(candidate)
+                except Exception as exc:
+                    img, exp, cid, src, state, warn = render(candidate)
+                    return img, exp, cid, src, state, warn, f"لم يُحفظ التخطي: {exc}", session.summary(), reviewed_id, text_value
             if candidate is not None and quality:
                 try:
                     message = session.record(candidate, quality, provenance, text_value)
@@ -241,6 +286,11 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str,
         bad.click(
             lambda c, s, last: move(c, BAD_CROP, s, "", last),
             inputs=[current, source, last_saved_id],
+            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id, corrected],
+        )
+        skip_btn.click(
+            lambda c, last: move(c, last_id=last, skip=True),
+            inputs=[current, last_saved_id],
             outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id, corrected],
         )
         next_btn.click(

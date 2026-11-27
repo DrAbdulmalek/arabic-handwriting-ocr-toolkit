@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from crop_correction_store import initialize, list_pending, training_rows
+from crop_correction_store import initialize, list_pending, training_rows, legacy_exclusion_ids, register_crop
 from hitl_review_app import ReviewSession, _safe_crop_path, _sha256_file, build_app
 
 
@@ -71,6 +71,52 @@ class ReviewAppTests(unittest.TestCase):
         self.assertEqual(list_pending(self.db), [])
         self.assertEqual(training_rows(self.db), [])
 
+
+
+
+    def test_skip_registered_pending_crop_marks_it_skipped(self):
+        import hashlib
+        payload = self.image.read_bytes()
+        register_crop(
+            self.db, crop_id="registered-1",
+            crop_hash=hashlib.sha256(payload).hexdigest(),
+            crop_image_ref=str(self.image), source_image_id="page-registered",
+            expected_text="توقع", expected_text_source="ORIGINAL_OCR_OUTPUT",
+            crop_quality="GOOD_CROP",
+            quality_evidence={"reviewer":"test","decision":"GOOD_CROP","checks":["visual"]},
+            crop_config_version="v1", model_version="v1", batch_id="batch-1",
+        )
+        candidate = self.session.next_candidate()
+        self.assertEqual(candidate["crop_id"], "registered-1")
+        self.assertTrue(candidate["is_registered"])
+        self.session.skip(candidate)
+        self.assertEqual(list_pending(self.db), [])
+
+    def test_skip_is_persistent_across_review_sessions(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute(
+                "INSERT INTO crops(id,page_name,crop_path,label,ignored,verified) VALUES (1,?,?,?,?,0)",
+                ("page-1", str(self.image), "توقع", 0),
+            )
+        candidate = self.session.next_candidate()
+        self.assertEqual(candidate["crop_id"], "legacy:1")
+        self.session.skip(candidate)
+        resumed = ReviewSession(self.db, (self.root,), "reviewer-restart")
+        self.assertIsNone(resumed.next_candidate())
+        self.assertEqual(legacy_exclusion_ids(self.db), {"legacy:1"})
+
+    def test_duplicate_image_hashes_are_auto_excluded_from_queue(self):
+        with sqlite3.connect(self.db) as conn:
+            for crop_id in (1, 2):
+                conn.execute(
+                    "INSERT INTO crops(id,page_name,crop_path,label,ignored,verified) VALUES (?,?,?,?,0,0)",
+                    (crop_id, "page-1", str(self.image), f"توقع {crop_id}"),
+                )
+        first = self.session.next_candidate()
+        self.assertEqual(first["crop_id"], "legacy:1")
+        self.session.skip(first)
+        self.assertIsNone(self.session.next_candidate())
+        self.assertEqual(legacy_exclusion_ids(self.db), {"legacy:1", "legacy:2"})
 
     def test_records_crop_model_and_batch_versions(self):
         session = ReviewSession(
