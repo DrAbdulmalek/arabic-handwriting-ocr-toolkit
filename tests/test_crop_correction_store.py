@@ -80,6 +80,21 @@ class CorrectionStoreTests(unittest.TestCase):
             row = conn.execute("SELECT id,label,verified FROM crops WHERE id=7").fetchone()
         self.assertEqual(row, (7, "legacy prediction", 0))
 
+    def test_initialize_refuses_to_create_a_missing_database(self):
+        missing = Path(self.tmp.name) / "typo.sqlite"
+        with self.assertRaises(FileNotFoundError):
+            initialize(missing)
+        self.assertFalse(missing.exists())
+
+    def test_quality_decision_is_immutable(self):
+        self.register()
+        import sqlite3
+        with self.assertRaises(sqlite3.IntegrityError):
+            with sqlite3.connect(self.db) as conn:
+                conn.execute(
+                    "UPDATE hitl_crop_corrections SET crop_quality='BAD_CROP' WHERE crop_id='c1'"
+                )
+
     def test_identity_and_expected_text_are_immutable(self):
         self.register()
         import sqlite3
