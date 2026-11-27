@@ -76,8 +76,8 @@ def build_model_and_processors(
 
     model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
         ENCODER_ID, decoder_id,
-        encoder_kwargs={"local_files_only": local_files_only},
-        decoder_kwargs={"local_files_only": local_files_only},
+        encoder_local_files_only=local_files_only,
+        decoder_local_files_only=local_files_only,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         decoder_id, local_files_only=local_files_only
