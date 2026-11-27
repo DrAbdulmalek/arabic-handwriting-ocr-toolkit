@@ -63,8 +63,12 @@ def validate_manifest(manifest_path: str | Path) -> tuple[Path, list[dict[str, A
         if previous_split != split:
             raise ValueError("Source-page leakage: one page appears in multiple splits")
 
-        relative = Path(str(row.get("image", "")))
-        if relative.is_absolute() or ".." in relative.parts:
+        relative_raw = str(row.get("image", "")).replace("\\", "/")
+        if (not relative_raw or relative_raw.startswith("/")
+                or re.match(r"^[A-Za-z]:", relative_raw)):
+            raise ValueError("Image path must be a safe relative path")
+        relative = Path(relative_raw)
+        if ".." in relative.parts:
             raise ValueError("Image path must be a safe relative path")
         image_path = (root / relative).resolve(strict=True)
         if root not in image_path.parents:
@@ -76,8 +80,11 @@ def validate_manifest(manifest_path: str | Path) -> tuple[Path, list[dict[str, A
                 image.verify()
         except Exception as exc:
             raise ValueError(f"Invalid image file for crop {crop_id}") from exc
-        digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
-        if digest != crop_hash:
+        digest = hashlib.sha256()
+        with image_path.open("rb") as image_stream:
+            for chunk in iter(lambda: image_stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != crop_hash:
             raise ValueError(f"Image hash mismatch for crop {crop_id}")
 
         seen_ids.add(crop_id)
