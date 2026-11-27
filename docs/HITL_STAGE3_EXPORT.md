@@ -40,7 +40,9 @@ python hitl_export_dataset.py \
 ```
 
 The new manifest records whether splits were newly seeded or reused from a
-prior manifest, plus the prior manifest's SHA-256 fingerprint.
+prior manifest, plus the prior manifest's SHA-256 fingerprint. The exporter
+fails closed if the prior manifest is malformed or has no source pages in
+common with the current batch; it will not silently reset the split plan.
 
 The output contains `images/`, `dataset.csv`, and `manifest.json`. The
 `text` column is the human correction; `expected_text` and
