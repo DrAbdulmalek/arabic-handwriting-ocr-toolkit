@@ -116,6 +116,8 @@ def export_training_dataset(
             "crop_hash": row["crop_hash"],
             "image": f"images/{image_name}",
             "text": row["corrected_text"].strip(),
+            "expected_text": row["expected_text"],
+            "expected_text_source": row["expected_text_source"],
             "page": row["source_image_id"],
             "split": page_map[str(row["source_image_id"])],
             "crop_config_version": row["crop_config_version"],
@@ -126,8 +128,9 @@ def export_training_dataset(
     with (out / "dataset.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(
             stream, fieldnames=[
-                "crop_id", "crop_hash", "image", "text", "page", "split",
-                "crop_config_version", "model_version", "batch_id",
+                "crop_id", "crop_hash", "image", "text", "expected_text",
+                "expected_text_source", "page", "split", "crop_config_version",
+                "model_version", "batch_id",
             ]
         )
         writer.writeheader()
