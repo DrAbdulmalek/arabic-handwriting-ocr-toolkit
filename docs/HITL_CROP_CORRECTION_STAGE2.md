@@ -1,11 +1,28 @@
-# HITL Stage 2 — Local review UI
+# HITL Stage 2 — Read-only legacy adapter and local review UI
 
-## What this stage adds
+## Legacy adapter contract
 
-`hitl_review_app.py` is a local Gradio interface for the human crop-quality
-and transcription workflow. It displays the crop image, legacy expected text
-(with a provenance warning when unknown), and a separate human-corrected text
-field. The reviewer must explicitly choose GOOD_CROP or BAD_CROP.
+The legacy database's `label` provenance is not reliable enough to treat every
+label as original OCR output. The review application may overwrite labels, and
+the legacy `verified` flag may also be set by automatic dictionary acceptance.
+
+- The adapter opens SQLite using URI `mode=ro` and `query_only`.
+- It never creates, migrates, updates, or deletes legacy records.
+- It excludes rows explicitly marked ignored.
+- It returns stable IDs as `legacy:<row-id>`.
+- Every legacy label is tagged `LEGACY_LABEL_UNVERIFIED`.
+- The legacy verified flag is informational only.
+- It requires an explicit crop-quality decision; it does not infer GOOD_CROP.
+- It checks path containment only when allowed roots are supplied.
+- It excludes crop IDs already registered in the HITL store before applying
+  the query limit.
+
+## Local review UI
+
+`hitl_review_app.py` is a local Gradio interface. It displays the crop image,
+legacy expected text (with a provenance warning when unknown), and a separate
+human-corrected text field. The reviewer must explicitly choose GOOD_CROP or
+BAD_CROP.
 
 The SHA-256 digest is computed locally from the selected crop file. Image bytes
 are not sent to GitHub, CI, or a remote inference service.
