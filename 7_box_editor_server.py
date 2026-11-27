@@ -36,6 +36,7 @@
 """
 import argparse
 import hmac
+import ipaddress
 import os
 import io
 import json
@@ -47,7 +48,7 @@ import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 try:
     from PIL import Image
@@ -1120,6 +1121,24 @@ def export_page(name, fmt="txt", mode="rows"):
     return txt.encode("utf-8"), "text/plain; charset=utf-8"
 
 
+def safe_content_disposition(name, fmt):
+    """إنشاء Content-Disposition دون CR/LF أو اقتباسات أو فواصل مسار خام."""
+    raw = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+    raw = "".join(
+        "_" if ord(ch) < 32 or ord(ch) == 127 or ch in '"\\/' else ch
+        for ch in raw
+    ).strip(" .")
+    raw = (raw[:100] or "export") + "." + fmt
+    fallback = "".join(
+        ch if ch.isascii() and (ch.isalnum() or ch in "._-") else "_"
+        for ch in raw
+    ).strip("._-") or ("export." + fmt)
+    return (
+        f'attachment; filename="{fallback}"; '
+        f"filename*=UTF-8''{quote(raw, safe='')}"
+    )
+
+
 # ─────────────────────────── خادم HTTP ───────────────────────────
 class Handler(BaseHTTPRequestHandler):
 
@@ -1127,24 +1146,24 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def end_headers(self):
-        """TASK-02C: حقن مركزي يغطي كل المسارات (json/html/img/export)."""
+        """CORS محدود للأصول المحلية المسموح بها؛ لا تُنشأ Cookies حاملة للأسرار."""
         o = self.headers.get("Origin")
         if o and (o in ALLOWED_ORIGINS or getattr(self, "_null_ok", False)):
             self.send_header("Access-Control-Allow-Origin", o)
             self.send_header("Vary", "Origin")
-        if getattr(self, "_cookie_ok", False) and AUTH_TOKEN:
-            self.send_header("Set-Cookie",
-                             f"tkn={AUTH_TOKEN}; Path=/; SameSite=Strict; HttpOnly")
         super().end_headers()
 
     def _local_file_panel(self):
-        """Origin: null = صفحة مفتوحة كملف محلي (لوحة التحكم من القرص). تُسمح لها بقراءة
-        عدّادَي الصحة والحالة فقط، ودون رمز، بشرط أن تسأل عن العنوان الحلقي نفسه — فلا يمرّ
-        طلب DNS rebinding باسم مضيف غريب، ولا تُقرأ أسماء الصفحات ولا نصوصها."""
-        return (self.command == "GET" and not AUTH_TOKEN
-                and urlparse(self.path).path in PUBLIC_GET
-                and self.headers.get("Host") in {f"127.0.0.1:{SERVER_PORT}",
-                                                 f"localhost:{SERVER_PORT}"})
+        """السماح لملف لوحة محلي بقراءة الإحصاءات العامة فقط؛ لا أسماء صفحات أو صور أو نصوص."""
+        return (
+            self.command == "GET"
+            and self.headers.get("Origin") == "null"
+            and urlparse(self.path).path in PUBLIC_GET
+            and self.headers.get("Host") in {
+                f"127.0.0.1:{SERVER_PORT}",
+                f"localhost:{SERVER_PORT}",
+            }
+        )
 
     def _origin_ok(self):
         o = self.headers.get("Origin")
@@ -1153,26 +1172,35 @@ class Handler(BaseHTTPRequestHandler):
         if o == "null" and self._local_file_panel():
             self._null_ok = True
             return True
-        return False
+        # دعم عناوين LAN/VPN الخاصة فقط عند تطابق Origin مع Host حرفياً.
+        # أسماء النطاقات العامة/المجهولة تُرفض لمنع DNS rebinding والنشر عبر tunnel عام.
+        try:
+            parsed = urlparse(o)
+            origin_ip = ipaddress.ip_address(parsed.hostname or "")
+            return (
+                parsed.scheme in {"http", "https"}
+                and parsed.netloc.lower() == (self.headers.get("Host") or "").lower()
+                and (origin_ip.is_private or origin_ip.is_loopback or origin_ip.is_link_local)
+            )
+        except ValueError:
+            return False
 
     @staticmethod
     def _same(given):
-        """مقارنة بزمن ثابت وعلى البايتات: لا تسريب عبر التوقيت ولا استثناء مع محارف غير ASCII."""
-        return bool(given) and hmac.compare_digest(given.encode("utf-8"), AUTH_TOKEN.encode("utf-8"))
+        """مقارنة زمنية ثابتة؛ لا يقبل أي مسار مصادقة غير ترويسة X-Auth-Token."""
+        return bool(given and AUTH_TOKEN) and hmac.compare_digest(
+            given.encode("utf-8"), AUTH_TOKEN.encode("utf-8")
+        )
 
     def _authed(self):
-        if not AUTH_TOKEN:
+        path = urlparse(self.path).path
+        # ملفات الواجهة ثابتة ولا تحتوي بيانات؛ تبقى قابلة للتحميل قبل إدخال الرمز.
+        if self.command == "GET" and path in {"/", "/panel"}:
             return True
-        if self._same(self.headers.get("X-Auth-Token")):
+        # الاستثناء الوحيد بلا رمز: إحصاءات عامة من ملف محلي إلى loopback.
+        if self._local_file_panel():
             return True
-        if self._same(parse_qs(urlparse(self.path).query).get("token", [""])[0]):
-            self._cookie_ok = True
-            return True
-        cookies = {}
-        for part in (self.headers.get("Cookie") or "").split(";"):
-            k, _, v = part.strip().partition("=")
-            cookies[k] = v
-        return self._same(cookies.get("tkn"))
+        return self._same(self.headers.get("X-Auth-Token"))
 
     def _guard(self):
         if not self._origin_ok():
@@ -1257,9 +1285,7 @@ class Handler(BaseHTTPRequestHandler):
                 body, ctype = export_page(name, fmt, mode)
                 self.send_response(200)
                 self.send_header("Content-Type", ctype)
-                safe = os.path.basename(name).replace('"', "").replace("\r", "").replace("\n", "")
-                self.send_header("Content-Disposition",
-                                 f'attachment; filename="{safe}.{fmt}"')
+                self.send_header("Content-Disposition", safe_content_disposition(name, fmt))
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 return self.wfile.write(body)
@@ -1286,17 +1312,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": str(e)}, 500)
 
     def _body(self):
-        n = int(self.headers.get("Content-Length", 0))
-        if n > MAX_BODY:
-            raise ValueError("body too large")
-        return json.loads(self.rfile.read(n) or b"{}")
+        n = int(self.headers.get("Content-Length", ""))
+        if n < 0 or n > MAX_BODY:
+            raise ValueError("invalid body length")
+        raw = self.rfile.read(n)
+        if len(raw) != n:
+            raise ValueError("incomplete request body")
+        return json.loads(raw or b"{}")
 
     def do_POST(self):
         u = urlparse(self.path)
         if not self._guard():
             return
         try:
-            if int(self.headers.get("Content-Length", 0)) > MAX_BODY:
+            if self.headers.get("Transfer-Encoding"):
+                return self._json({"error": "Transfer-Encoding is not supported"}, 501)
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
+                return self._json({"error": "Content-Length is required"}, 411)
+            try:
+                body_length = int(raw_length)
+            except ValueError:
+                return self._json({"error": "invalid Content-Length"}, 400)
+            if body_length < 0:
+                return self._json({"error": "invalid Content-Length"}, 400)
+            if body_length > MAX_BODY:
                 return self._json({"error": "body too large"}, 413)
             ct = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ct != "application/json":
@@ -1333,6 +1373,8 @@ class Handler(BaseHTTPRequestHandler):
                         n += 1
                 return self._json({"recorded": True, "count": n})
             return self._json({"error": "مسار غير معروف"}, 404)
+        except ValueError:
+            return self._json({"error": "invalid request body"}, 400)
         except Exception as e:
             app_log("error", path=u.path, method="POST", error=str(e))
             return self._json({"error": str(e)}, 500)
@@ -1358,6 +1400,35 @@ def lan_urls(port):
     return [f"http://{ip}:{port}" for ip in sorted(ips)]
 
 
+def store_auth_token(token, path=None):
+    """حفظ رمز الجلسة محلياً بصلاحية 0600 دون طباعته أو وضعه في URL."""
+    token_path = Path(path) if path else (
+        Path.home() / ".config" / "arabic-handwriting-ocr-toolkit" / "box-editor.token"
+    )
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(token_path.parent, 0o700)
+    except OSError:
+        pass
+    temp_path = token_path.with_name(token_path.name + "." + uuid.uuid4().hex + ".tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(str(temp_path), flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(token)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, token_path)
+        os.chmod(token_path, 0o600)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+        raise
+    return token_path
+
+
 def main():
     ap = argparse.ArgumentParser(description="خادم مراجعة مربعات الكلمات")
     ap.add_argument("--port", type=int, default=7863)
@@ -1367,7 +1438,7 @@ def main():
                     help="تسجيل إذن إرسال بيانات الاستخدام المجهولة للمطوّر "
                          "بدون سؤال (تُحفظ في ocr_data/telemetry.json)")
     ap.add_argument("--require-token", action="store_true",
-                    help="TASK-02C: فرض رمز وصول حتى على 127.0.0.1")
+                    help="مُبقى للتوافق؛ المصادقة مطلوبة دائماً على واجهات API")
     ap.add_argument("--no-prompt", action="store_true",
                     help="لا تسأل عن الإذن في الطرفية عند البدء")
     args = ap.parse_args()
@@ -1397,18 +1468,27 @@ def main():
     import secrets
     SERVER_PORT = args.port
     ALLOWED_ORIGINS = {f"http://127.0.0.1:{args.port}", f"http://localhost:{args.port}"}
-    if args.host == "0.0.0.0" or args.require_token:
-        AUTH_TOKEN = secrets.token_urlsafe(18)
-        REQUIRE_TOKEN = True
+    if args.host == "0.0.0.0":
         ALLOWED_ORIGINS |= {u.rstrip("/") for u in lan_urls(args.port)}
+    # المصادقة مفعّلة دائماً، حتى عند الاستماع على loopback؛ يمنع ذلك تعريض API
+    # بلا حماية إذا وُضع reverse proxy/tunnel أمام الخادم لاحقاً.
+    AUTH_TOKEN = secrets.token_urlsafe(32)
+    REQUIRE_TOKEN = True
+    try:
+        token_path = store_auth_token(AUTH_TOKEN)
+    except OSError as exc:
+        sys.exit(f"تعذر حفظ رمز الوصول محلياً بأمان: {exc}")
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     srv.daemon_threads = True
 
     print(f"✅ واجهة المراجعة جاهزة:  http://127.0.0.1:{args.port}/panel  (لوحة التحكم)")
     print(f"   المحرر مباشرة:            http://127.0.0.1:{args.port}/")
+    print("🔐 المصادقة مطلوبة دائماً؛ رمز جديد محفوظ محلياً دون طباعته:")
+    print(f"   ملف الرمز: {token_path} (صلاحية 0600)")
+    print("   أدخل محتوى هذا الملف في نافذة رمز الوصول التي تظهر في المتصفح.")
     if args.host == "0.0.0.0":
-        urls = [u.rstrip("/") + "/?token=" + AUTH_TOKEN for u in lan_urls(args.port)]
+        urls = [u.rstrip("/") + "/" for u in lan_urls(args.port)]
         for u in urls:
             print(f"   📱 من الجوال (نفس Wi-Fi):  {u}")
         if urls:
@@ -1417,7 +1497,7 @@ def main():
                 qr = qrcode.QRCode(border=1)
                 qr.add_data(urls[0])
                 qr.make()
-                print("   ── امسح هذا الرمز بكاميرا الجوال ──")
+                print("   ── امسح هذا الرمز بكاميرا الجوال؛ الرمز السري غير مضمن ──")
                 qr.print_ascii(invert=True)
             except ImportError:
                 print("   💡 لطباعة رمز QR يمسحه الجوال:  pip install qrcode")
