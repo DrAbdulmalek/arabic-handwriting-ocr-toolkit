@@ -64,6 +64,42 @@ class HitlExportTests(unittest.TestCase):
             self.assertTrue((out / row["image"]).is_file())
             self.assertTrue(row["text"].startswith("تصحيح"))
 
+
+    def test_prior_manifest_preserves_existing_page_splits_for_batch_two(self):
+        first_out = Path(self.tmp.name) / "batch-one"
+        export_training_dataset(self.db, first_out, allowed_crop_roots=[self.root])
+        first = json.loads((first_out / "manifest.json").read_text(encoding="utf-8"))
+        previous = {row["page"]: row["split"] for row in first["rows"]}
+
+        path = self.root / "crop-3.png"
+        Image.new("RGB", (12, 8), "purple").save(path)
+        payload = path.read_bytes()
+        register_crop(
+            self.db, crop_id="crop-3",
+            crop_hash=hashlib.sha256(payload).hexdigest(),
+            crop_image_ref=str(path), source_image_id="page-3",
+            expected_text="OCR", expected_text_source="ORIGINAL_OCR_OUTPUT",
+            crop_quality="GOOD_CROP",
+            quality_evidence={"reviewer":"test","decision":"GOOD_CROP","checks":["visual"]},
+            crop_config_version="crop-v2", model_version="ocr-v1", batch_id="batch-two",
+        )
+        save_correction(self.db, "crop-3", "تصحيح 3")
+        validate_correction(self.db, "crop-3")
+        mark_training_ready(self.db, "crop-3")
+
+        second_out = Path(self.tmp.name) / "batch-two"
+        export_training_dataset(
+            self.db, second_out, allowed_crop_roots=[self.root],
+            prior_manifest=first_out / "manifest.json",
+        )
+        second = json.loads((second_out / "manifest.json").read_text(encoding="utf-8"))
+        current = {row["page"]: row["split"] for row in second["rows"]}
+        for page, split in previous.items():
+            self.assertEqual(current[page], split)
+        self.assertIn("page-3", current)
+        self.assertEqual(second["split_source"], "REUSED_PRIOR_MANIFEST")
+        self.assertEqual(len(second["prior_manifest_sha256"]), 64)
+
     def test_existing_output_is_never_overwritten(self):
         out = Path(self.tmp.name) / "existing"
         out.mkdir()
