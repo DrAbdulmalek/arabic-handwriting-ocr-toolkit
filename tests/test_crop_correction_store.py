@@ -8,6 +8,7 @@ from crop_correction_store import (
     DuplicateCropError, EligibilityError, initialize, register_crop,
     list_pending, save_correction, validate_correction, mark_training_ready,
     training_rows, correction_history,
+    record_legacy_exclusion, legacy_exclusion_ids, known_crop_hashes,
 )
 
 
@@ -116,6 +117,16 @@ class CorrectionStoreTests(unittest.TestCase):
                 "SELECT value FROM hitl_schema_meta WHERE key='schema_version'"
             ).fetchone()[0]
         self.assertEqual(version, "2")
+
+
+    def test_persistent_legacy_skip_is_separate_from_crop_quality(self):
+        record_legacy_exclusion(
+            self.db, crop_id="legacy:44", crop_hash="d" * 64,
+            source_image_id="page-44", reason="USER_SKIPPED", actor="reviewer",
+        )
+        self.assertEqual(legacy_exclusion_ids(self.db), {"legacy:44"})
+        self.assertIn("d" * 64, known_crop_hashes(self.db))
+        self.assertEqual(training_rows(self.db), [])
 
     def test_legacy_crops_table_untouched(self):
         import sqlite3
