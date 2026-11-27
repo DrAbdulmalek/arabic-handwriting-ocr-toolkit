@@ -71,6 +71,23 @@ class ReviewAppTests(unittest.TestCase):
         self.assertEqual(list_pending(self.db), [])
         self.assertEqual(training_rows(self.db), [])
 
+
+    def test_records_crop_model_and_batch_versions(self):
+        session = ReviewSession(
+            self.db, (self.root,), "reviewer-v2",
+            crop_config_version="crop-v2", model_version="ocr-v3",
+            batch_id="batch-two",
+        )
+        session.record(
+            self.candidate, "GOOD_CROP", "LEGACY_LABEL_UNVERIFIED", "النص الصحيح"
+        )
+        with sqlite3.connect(self.db) as conn:
+            row = conn.execute(
+                "SELECT crop_config_version,model_version,batch_id "
+                "FROM hitl_crop_corrections WHERE crop_id='legacy:1'"
+            ).fetchone()
+        self.assertEqual(row, ("crop-v2", "ocr-v3", "batch-two"))
+
     def test_bad_crop_is_excluded_from_transcription_and_training(self):
         message = self.session.record(
             self.candidate, "BAD_CROP", "LEGACY_LABEL_UNVERIFIED", ""

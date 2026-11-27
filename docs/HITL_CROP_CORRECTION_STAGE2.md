@@ -49,7 +49,10 @@ After installing the repository requirements, run:
 python hitl_review_app.py \
   --db /absolute/path/to/ocr_data/crops.db \
   --crop-root /absolute/path/to/ocr_data/crops \
-  --reviewer local-reviewer
+  --reviewer local-reviewer \
+  --crop-config-version crop-v2 \
+  --model-version ocr-v1 \
+  --batch-id batch-two
 ```
 
 Open `http://127.0.0.1:7864` on the same computer.
