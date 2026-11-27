@@ -118,28 +118,39 @@ function copyBtn(btn) {
 }
 document.querySelectorAll(".cmd button").forEach(b => b.addEventListener("click", () => copyBtn(b)));
 
-// الحالة الحية: من نفس الخادم (عند فتحها عبر /panel) أو من 127.0.0.1 (عند فتحها كملف محلي)
+// الحالة الحية: من نفس الخادم (عند فتحها عبر /panel)، أو من 127.0.0.1 فقط عندما تُفتح كملف محلي.
+// لا يُجرَّب 127.0.0.1 على الجوال: هناك يعني الجهاز نفسه، فتُظهر اللوحة أن الخادم متوقف خطأً.
+function healthUrls() {
+  if (location.protocol === "http:" || location.protocol === "https:")
+    return ["api/health", location.origin + "/api/health"];
+  return ["http://127.0.0.1:7863/api/health"];  // ملف محلي: الخادم على الجهاز نفسه (المنفذ الافتراضي)
+}
 async function checkStatus() {
   const badge = document.getElementById("srvBadge");
-  const tries = ["api/health", "http://127.0.0.1:7863/api/health"];
-  for (const u of tries) {
+  for (const u of healthUrls()) {
+    let r;
+    try { r = await fetch(u); } catch (e) { continue; }
+    if (r.status === 401) {  // الخادم يعمل بوضع الرمز (شبكة أو --require-token)
+      badge.className = "badge off";
+      badge.textContent = "🔒 الخادم يعمل ويطلب رمز وصول — افتحه من رابط الرمز";
+      return;
+    }
     try {
-      const r = await fetch(u);
       const j = await r.json();
       badge.className = "badge ok";
       badge.textContent = j.ok ? "✓ الخادم يعمل الآن" : "؟";
       try {
-        const p = await fetch(u.replace("health", "pages")).then(x => x.json());
+        const p = await fetch(u.replace("health", "status")).then(x => x.json());
         document.getElementById("nVer").textContent = p.total_verified.toLocaleString("en");
         const pct = p.total_active ? Math.round(100 * p.total_verified / p.total_active) : 0;
         document.getElementById("progNote").textContent =
-          `تقدم المراجعة الحي: ${p.total_verified.toLocaleString("en")} من ${p.total_active.toLocaleString("en")} كلمة نشطة (${pct}%) — ${p.pages.length} صفحة`;
+          `تقدم المراجعة الحي: ${p.total_verified.toLocaleString("en")} من ${p.total_active.toLocaleString("en")} كلمة نشطة (${pct}%) — ${p.pages} صفحة`;
       } catch (e) {}
       return;
     } catch (e) {}
   }
   badge.className = "badge off";
-  badge.textContent = "✗ الخادم متوقف — شغّله من اللابتوب أو Colab";
+  badge.textContent = "✗ لا اتصال بالخادم — شغّله من اللابتوب أو Colab، وإن كان يعمل بوضع الرمز فافتح اللوحة من رابط الرمز";
 }
 checkStatus();
 setInterval(checkStatus, 10000);
