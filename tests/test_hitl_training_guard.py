@@ -19,7 +19,11 @@ class TrainingGuardTests(unittest.TestCase):
             "format_version": 1,
             "source": "HITL_TRAINING_READY_ONLY",
             "row_count": 3,
-            "rows": [],
+            "rows": [
+                {"page":"page-a","split":"train"},
+                {"page":"page-b","split":"val"},
+                {"page":"page-c","split":"test"},
+            ],
         }
         raw = json.dumps(self.manifest, ensure_ascii=False).encode()
         (self.root / "hitl_manifest.json").write_bytes(raw)
@@ -42,6 +46,18 @@ class TrainingGuardTests(unittest.TestCase):
     def test_rejects_tampered_manifest(self):
         with (self.root / "hitl_manifest.json").open("a", encoding="utf-8") as stream:
             stream.write(" ")
+        with self.assertRaises(ValueError):
+            verify_hitl_dataset(self.root)
+
+
+    def test_rejects_page_level_split_leakage(self):
+        manifest = json.loads((self.root / "hitl_manifest.json").read_text(encoding="utf-8"))
+        manifest["rows"][1]["page"] = "page-a"
+        raw = json.dumps(manifest, ensure_ascii=False).encode()
+        (self.root / "hitl_manifest.json").write_bytes(raw)
+        metadata = json.loads((self.root / "hitl_dataset_metadata.json").read_text(encoding="utf-8"))
+        metadata["source_manifest_sha256"] = hashlib.sha256(raw).hexdigest()
+        (self.root / "hitl_dataset_metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
         with self.assertRaises(ValueError):
             verify_hitl_dataset(self.root)
 
