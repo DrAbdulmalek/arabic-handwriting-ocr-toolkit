@@ -1,0 +1,30 @@
+name: HITL correction-store tests
+
+on:
+  pull_request:
+    paths:
+      - "crop_correction_store.py"
+      - "tests/test_crop_correction_store.py"
+      - ".github/workflows/hitl-tests.yml"
+  push:
+    branches:
+      - "feat/hitl-crop-correction-learning"
+    paths:
+      - "crop_correction_store.py"
+      - "tests/test_crop_correction_store.py"
+      - ".github/workflows/hitl-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run isolated correction-store tests
+        run: python -m unittest discover -s tests -p "test_crop_correction_store.py" -v
