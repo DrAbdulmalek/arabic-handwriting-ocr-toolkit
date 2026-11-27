@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from crop_correction_store import initialize, list_pending, training_rows, legacy_exclusion_ids
+from crop_correction_store import initialize, list_pending, training_rows, legacy_exclusion_ids, register_crop
 from hitl_review_app import ReviewSession, _safe_crop_path, _sha256_file, build_app
 
 
@@ -72,6 +72,25 @@ class ReviewAppTests(unittest.TestCase):
         self.assertEqual(training_rows(self.db), [])
 
 
+
+
+    def test_skip_registered_pending_crop_marks_it_skipped(self):
+        import hashlib
+        payload = self.image.read_bytes()
+        register_crop(
+            self.db, crop_id="registered-1",
+            crop_hash=hashlib.sha256(payload).hexdigest(),
+            crop_image_ref=str(self.image), source_image_id="page-registered",
+            expected_text="توقع", expected_text_source="ORIGINAL_OCR_OUTPUT",
+            crop_quality="GOOD_CROP",
+            quality_evidence={"reviewer":"test","decision":"GOOD_CROP","checks":["visual"]},
+            crop_config_version="v1", model_version="v1", batch_id="batch-1",
+        )
+        candidate = self.session.next_candidate()
+        self.assertEqual(candidate["crop_id"], "registered-1")
+        self.assertTrue(candidate["is_registered"])
+        self.session.skip(candidate)
+        self.assertEqual(list_pending(self.db), [])
 
     def test_skip_is_persistent_across_review_sessions(self):
         with sqlite3.connect(self.db) as conn:
