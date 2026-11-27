@@ -29,7 +29,7 @@ class CorrectionStoreTests(unittest.TestCase):
         register_crop(
             self.db, crop_id=crop_id, crop_hash=crop_hash,
             crop_image_ref="local://crops/c1.png", source_image_id="page-1",
-            expected_text="توقع OCR", crop_quality=quality,
+            expected_text="توقع OCR", expected_text_source="ORIGINAL_OCR_OUTPUT", crop_quality=quality,
             quality_evidence={"reviewer":"test", "checks":["bounds","nonempty"]},
             crop_config_version="crop-v1", model_version="ocr-v1",
             batch_id="batch-1", bounding_box={"x":1,"y":2,"w":30,"h":10},
@@ -48,9 +48,9 @@ class CorrectionStoreTests(unittest.TestCase):
         import sqlite3
         with sqlite3.connect(self.db) as conn:
             row = conn.execute(
-                "SELECT expected_text,corrected_text,correction_status FROM hitl_crop_corrections"
+                "SELECT expected_text,expected_text_source,corrected_text,correction_status FROM hitl_crop_corrections"
             ).fetchone()
-        self.assertEqual(row, ("توقع OCR", "النص الصحيح", CORRECTED))
+        self.assertEqual(row, ("توقع OCR", "ORIGINAL_OCR_OUTPUT", "النص الصحيح", CORRECTED))
         self.assertEqual(len(correction_history(self.db, "c1")), 1)
 
     def test_bad_crop_cannot_be_corrected(self):
@@ -73,6 +73,43 @@ class CorrectionStoreTests(unittest.TestCase):
         rows = training_rows(self.db)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["corrected_text"], "النص الصحيح")
+
+
+    def test_expected_text_source_is_required_and_validated(self):
+        import sqlite3
+        with self.assertRaises(ValueError):
+            register_crop(
+                self.db, crop_id="bad-source", crop_hash="hash-source",
+                crop_image_ref="local://crops/a.png", source_image_id="page-1",
+                expected_text="نص", expected_text_source="GUESSED",
+                crop_quality=GOOD_CROP, quality_evidence={"reviewer":"test"},
+                crop_config_version="crop-v1", model_version="ocr-v1", batch_id="batch-1",
+            )
+        self.assertEqual(list_pending(self.db), [])
+
+    def test_recorrection_invalidates_previous_approval(self):
+        self.register()
+        save_correction(self.db, "c1", "تصحيح أول")
+        validate_correction(self.db, "c1")
+        mark_training_ready(self.db, "c1")
+        save_correction(self.db, "c1", "تصحيح منقح")
+        self.assertEqual(training_rows(self.db), [])
+        import sqlite3
+        with sqlite3.connect(self.db) as conn:
+            status = conn.execute(
+                "SELECT correction_status FROM hitl_crop_corrections WHERE crop_id='c1'"
+            ).fetchone()[0]
+        self.assertEqual(status, CORRECTED)
+
+    def test_initialize_is_idempotent(self):
+        initialize(self.db)
+        initialize(self.db)
+        import sqlite3
+        with sqlite3.connect(self.db) as conn:
+            version = conn.execute(
+                "SELECT value FROM hitl_schema_meta WHERE key='schema_version'"
+            ).fetchone()[0]
+        self.assertEqual(version, "2")
 
     def test_legacy_crops_table_untouched(self):
         import sqlite3
