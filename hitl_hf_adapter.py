@@ -98,7 +98,10 @@ def validate_manifest(manifest_path: str | Path) -> tuple[Path, list[dict[str, A
 
 def build_hf_dataset(manifest_path: str | Path, output_dir: str | Path) -> dict[str, Any]:
     """Validate a manifest, then save a new local DatasetDict directory."""
-    root, rows = validate_manifest(manifest_path)
+    manifest_file = Path(manifest_path).expanduser().resolve(strict=True)
+    root, rows = validate_manifest(manifest_file)
+    manifest_bytes = manifest_file.read_bytes()
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
     out = Path(output_dir).expanduser().resolve(strict=False)
     if out == root or root in out.parents or out in root.parents:
         raise ValueError("HF output directory must be separate from the source export")
@@ -126,11 +129,23 @@ def build_hf_dataset(manifest_path: str | Path, output_dir: str | Path) -> dict[
 
     out.parent.mkdir(parents=True, exist_ok=True)
     DatasetDict(splits).save_to_disk(str(out))
+    (out / "hitl_manifest.json").write_bytes(manifest_bytes)
+    metadata = {
+        "source": "HITL_TRAINING_READY_ONLY",
+        "source_manifest_sha256": manifest_sha256,
+        "rows": len(rows),
+        "split_counts": {split: len(splits[split]) for split in _REQUIRED_SPLITS},
+        "uploaded": False,
+    }
+    (out / "hitl_dataset_metadata.json").write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return {
         "output_dir": str(out),
         "rows": len(rows),
         "split_counts": {split: len(splits[split]) for split in _REQUIRED_SPLITS},
         "source": "HITL_TRAINING_READY_ONLY",
+        "source_manifest_sha256": manifest_sha256,
         "uploaded": False,
     }
 
