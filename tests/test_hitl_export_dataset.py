@@ -56,6 +56,8 @@ class HitlExportTests(unittest.TestCase):
         self.assertEqual({row["split"] for row in manifest["rows"]}, {"train","val","test"})
         self.assertTrue(all(row["model_version"] == "test" for row in manifest["rows"]))
         self.assertTrue(all(row["crop_config_version"] == "test" for row in manifest["rows"]))
+        self.assertTrue(all(row["expected_text_source"] == "ORIGINAL_OCR_OUTPUT" for row in manifest["rows"]))
+        self.assertTrue(all(row["expected_text"] == "OCR" for row in manifest["rows"]))
         for row in manifest["rows"]:
             self.assertTrue((out / row["image"]).is_file())
             self.assertTrue(row["text"].startswith("تصحيح"))
