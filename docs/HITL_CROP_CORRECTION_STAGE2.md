@@ -1,45 +1,73 @@
-# HITL Stage 2 — Read-only legacy adapter
+# HITL Stage 2 — Read-only legacy adapter and local review UI
 
-## Purpose
+## Legacy adapter contract
 
-The legacy database contains crop records, but its label provenance is not
-reliable enough to treat every label as the original OCR output. In particular,
-the legacy review application can overwrite label text, and the verified flag
-can also be set by automatic dictionary acceptance.
+The legacy database's `label` provenance is not reliable enough to treat every
+label as original OCR output. The review application may overwrite labels, and
+the legacy `verified` flag may also be set by automatic dictionary acceptance.
 
-## Adapter contract
+- The adapter opens SQLite using URI `mode=ro` and `query_only`.
+- It never creates, migrates, updates, or deletes legacy records.
+- It excludes rows explicitly marked ignored.
+- It returns stable IDs as `legacy:<row-id>`.
+- Every legacy label is tagged `LEGACY_LABEL_UNVERIFIED`.
+- The legacy verified flag is informational only.
+- It requires an explicit crop-quality decision; it does not infer GOOD_CROP.
+- It checks path containment only when allowed roots are supplied.
+- It excludes crop IDs already registered in the HITL store before applying
+  the query limit.
 
-- Opens the existing SQLite database with SQLite URI mode=ro and query_only.
-- Never creates, migrates, updates, or deletes legacy records.
-- Excludes only rows explicitly marked ignored.
-- Returns a stable adapter identity in the form legacy:<row-id>.
-- Marks every legacy label as LEGACY_LABEL_UNVERIFIED.
-- Reports the legacy verified flag as informational metadata only.
-- Requires an explicit crop-quality decision; it does not infer GOOD_CROP.
-- Does not authorize transcription or HITL registration.
-- Checks crop path containment only when allowed_crop_roots is explicitly
-  supplied. It checks metadata/path existence but does not open image bytes.
-- Omits rows already present in the HITL store under the same adapter ID.
+## Local review UI
 
-## Important limitation
+`hitl_review_app.py` is a local Gradio interface. It displays the crop image,
+legacy expected text (with a provenance warning when unknown), and a separate
+human-corrected text field. The reviewer must explicitly choose GOOD_CROP or
+BAD_CROP.
 
-This adapter does not prove that the local image exists or is the correct crop
-until run against the user's local database and filesystem. It also cannot
-reconstruct the original OCR prediction where the old review application
-overwrote label. Such rows must remain provenance-unknown unless an independent
-OCR output record is found.
+The SHA-256 digest is computed locally from the selected crop file. Image bytes
+are not sent to GitHub, CI, or a remote inference service.
 
-## Not included in this stage
+## Privacy and network boundary
 
-No UI, bulk registration, Excel/CSV round-trip, image hashing, crop-engine
-feedback, database migration, or model training is implemented. No real user
-database or crop image is accessed by CI.
+- Gradio `share=False` is hard-coded.
+- The default bind address is `127.0.0.1`.
+- A crop path must resolve inside one of the explicit `--crop-root` folders.
+- The SQLite database must already exist; the app refuses to create a new DB.
+- The legacy adapter remains read-only. Only the separate HITL tables are
+  written after an explicit human decision.
+- No real database or image is included in this repository.
 
-## Next integration gates
+Do not expose the app on a public interface. If changing `--host` from the
+loopback default, use only a trusted, isolated network. This minimal stage
+does not implement user authentication.
 
-1. Inspect the adapter output locally in read-only mode against a copy of the
-   database, without uploading the database or images.
-2. Resolve and verify crop paths under a user-selected allowed root.
-3. Add explicit human GOOD_CROP/BAD_CROP review before registration.
-4. Add a batch manifest with stable IDs and image hashes calculated locally.
-5. Build the correction UI and controlled export/import only after those gates.
+## Local launch (not executed by CI)
+
+After installing the repository requirements, run:
+
+```bash
+python hitl_review_app.py \
+  --db /absolute/path/to/ocr_data/crops.db \
+  --crop-root /absolute/path/to/ocr_data/crops \
+  --reviewer local-reviewer
+```
+
+Open `http://127.0.0.1:7864` on the same computer.
+
+## Review and training gates
+
+- BAD_CROP is recorded as rejected and cannot receive transcription.
+- GOOD_CROP requires a non-empty human transcription.
+- A saved correction remains CORRECTED until the independent validation action.
+- The separate training-ready action is required after validation.
+- Re-editing a correction resets its status to CORRECTED.
+
+## Known limitations
+
+This is the first UI integration, not the complete batch workflow. CSV/XLSX
+manifest export/import, tamper/replay protection, explicit skipped-crop
+bookkeeping, duplicate-image queue diagnostics, Crop Engine feedback, and a
+HITL-only Dataset exporter are still pending. The legacy `4_export_dataset.py`
+must not be treated as the HITL export path: it still has destructive output
+directory replacement and trusts the legacy `verified` flag. Those issues
+must be addressed before using it for this correction dataset.
