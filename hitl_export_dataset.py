@@ -71,6 +71,8 @@ def export_training_dataset(
     seed: int = 42,
 ) -> dict[str, object]:
     """Export only HITL TRAINING_READY rows into a new, never-overwritten folder."""
+    if isinstance(allowed_crop_roots, (str, Path)):
+        allowed_crop_roots = (allowed_crop_roots,)
     roots = tuple(Path(root).expanduser().resolve(strict=True) for root in allowed_crop_roots)
     if not roots:
         raise ValueError("At least one allowed crop root is required")
@@ -90,6 +92,8 @@ def export_training_dataset(
 
     page_map = _page_splits((str(row["source_image_id"]) for row, _ in prepared), ratios, seed)
     out = Path(output_dir).expanduser().resolve(strict=False)
+    if any(out == root or root in out.parents or out in root.parents for root in roots):
+        raise ValueError("Output directory must be outside all crop roots")
     if out.exists():
         raise FileExistsError(f"Refusing to overwrite existing output directory: {out}")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -114,11 +118,17 @@ def export_training_dataset(
             "text": row["corrected_text"].strip(),
             "page": row["source_image_id"],
             "split": page_map[str(row["source_image_id"])],
+            "crop_config_version": row["crop_config_version"],
+            "model_version": row["model_version"],
+            "batch_id": row["batch_id"],
         })
 
     with (out / "dataset.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(
-            stream, fieldnames=["crop_id", "crop_hash", "image", "text", "page", "split"]
+            stream, fieldnames=[
+                "crop_id", "crop_hash", "image", "text", "page", "split",
+                "crop_config_version", "model_version", "batch_id",
+            ]
         )
         writer.writeheader()
         writer.writerows(manifest_rows)
