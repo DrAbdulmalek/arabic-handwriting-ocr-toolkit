@@ -330,8 +330,9 @@ def mark_training_ready(db_path: str | Path, crop_id: str) -> None:
 
 def training_rows(db_path: str | Path, *, batch_id: Optional[str] = None) -> list[dict[str, Any]]:
     """Return only validated training-ready human corrections."""
-    sql = """SELECT crop_id,crop_hash,crop_image_ref,source_image_id,corrected_text,
-                    bounding_box_json,crop_config_version,model_version,batch_id
+    sql = """SELECT crop_id,crop_hash,crop_image_ref,source_image_id,expected_text,
+                    expected_text_source,corrected_text,bounding_box_json,
+                    crop_config_version,model_version,batch_id
              FROM hitl_crop_corrections
              WHERE crop_quality='GOOD_CROP' AND correction_status='TRAINING_READY'
                AND corrected_text IS NOT NULL"""
