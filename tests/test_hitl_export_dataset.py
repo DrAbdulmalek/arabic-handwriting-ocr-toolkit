@@ -54,6 +54,8 @@ class HitlExportTests(unittest.TestCase):
         self.assertEqual(len(manifest["rows"]), 3)
         self.assertEqual({row["page"] for row in manifest["rows"]}, {"page-0","page-1","page-2"})
         self.assertEqual({row["split"] for row in manifest["rows"]}, {"train","val","test"})
+        self.assertTrue(all(row["model_version"] == "test" for row in manifest["rows"]))
+        self.assertTrue(all(row["crop_config_version"] == "test" for row in manifest["rows"]))
         for row in manifest["rows"]:
             self.assertTrue((out / row["image"]).is_file())
             self.assertTrue(row["text"].startswith("تصحيح"))
@@ -96,6 +98,13 @@ class HitlExportTests(unittest.TestCase):
         out = Path(self.tmp.name) / "outside-export"
         with self.assertRaises(ValueError):
             export_training_dataset(db2, out, allowed_crop_roots=[self.root])
+        self.assertFalse(out.exists())
+
+
+    def test_output_must_not_be_inside_crop_root(self):
+        out = self.root / "nested-export"
+        with self.assertRaises(ValueError):
+            export_training_dataset(self.db, out, allowed_crop_roots=[self.root])
         self.assertFalse(out.exists())
 
     def test_requires_at_least_three_source_pages(self):
