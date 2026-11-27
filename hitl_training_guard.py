@@ -90,7 +90,7 @@ def verify_datasetdict_content(
     page_split: dict[str, str] = {}
     for row in manifest.get("rows", []):
         page, split = str(row.get("page", "")), str(row.get("split", ""))
-        expected[split][(page, str(row.get("text", "")).strip(), str(row.get("crop_hash", "")))] += 1
+        expected[split][(page, str(row.get("text", "")), str(row.get("crop_hash", "")))] += 1
         page_split.setdefault(page, split)
 
     missing = [s for s in required_splits if s not in dataset_dict]
@@ -103,7 +103,7 @@ def verify_datasetdict_content(
         split_ds = dataset_dict[split].cast_column("image", HFImage(decode=False))
         actual[split] = Counter()
         for index, row in enumerate(split_ds):
-            page, text = str(row.get("page", "")), str(row.get("text", "")).strip()
+            page, text = str(row.get("page", "")), str(row.get("text", ""))
             image = row.get("image") or {}
             payload = image.get("bytes")
             if payload is None:
