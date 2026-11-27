@@ -116,7 +116,7 @@ class CorrectionStoreTests(unittest.TestCase):
             version = conn.execute(
                 "SELECT value FROM hitl_schema_meta WHERE key='schema_version'"
             ).fetchone()[0]
-        self.assertEqual(version, "2")
+        self.assertEqual(version, "4")
 
 
     def test_persistent_legacy_skip_is_separate_from_crop_quality(self):
