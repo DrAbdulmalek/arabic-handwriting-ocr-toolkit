@@ -9,16 +9,19 @@ on:
       - "hitl_export_dataset.py"
       - "hitl_crop_feedback.py"
       - "hitl_hf_adapter.py"
+      - "hitl_training_guard.py"
+      - "5_train_trocr_colab.py"
       - "tests/test_crop_correction_store.py"
       - "tests/test_crop_legacy_adapter.py"
       - "tests/test_hitl_review_app.py"
       - "tests/test_hitl_export_dataset.py"
       - "tests/test_hitl_crop_feedback.py"
       - "tests/test_hitl_hf_adapter.py"
+      - "tests/test_hitl_training_guard.py"
       - ".github/workflows/hitl-tests.yml"
   push:
     branches:
-      - "feat/hitl-persistent-skip-dedup-stage6"
+      - "feat/hitl-training-baseline-stage7"
     paths:
       - "crop_correction_store.py"
       - "crop_legacy_adapter.py"
@@ -51,7 +54,7 @@ jobs:
           python -m pip install "gradio>=4.44,<6" "datasets>=2.20"
       - name: Compile HITL modules
         run: |
-          python -m py_compile crop_correction_store.py crop_legacy_adapter.py hitl_review_app.py hitl_export_dataset.py hitl_crop_feedback.py hitl_hf_adapter.py
+          python -m py_compile crop_correction_store.py crop_legacy_adapter.py hitl_review_app.py hitl_export_dataset.py hitl_crop_feedback.py hitl_hf_adapter.py hitl_training_guard.py 5_train_trocr_colab.py
       - name: Run isolated HITL unit tests
         run: |
           python -m unittest discover -s tests -p "test_crop_correction_store.py" -v
@@ -60,3 +63,4 @@ jobs:
           python -m unittest discover -s tests -p "test_hitl_export_dataset.py" -v
           python -m unittest discover -s tests -p "test_hitl_crop_feedback.py" -v
           python -m unittest discover -s tests -p "test_hitl_hf_adapter.py" -v
+          python -m unittest discover -s tests -p "test_hitl_training_guard.py" -v
