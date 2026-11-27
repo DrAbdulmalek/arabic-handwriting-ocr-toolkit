@@ -72,14 +72,19 @@ def _read_prior_page_splits(prior_manifest: str | Path | None) -> tuple[dict[str
     manifest = json.loads(raw.decode("utf-8"))
     if manifest.get("source") != "HITL_TRAINING_READY_ONLY":
         raise ValueError("Prior manifest is not a HITL training-ready export")
+    prior_rows = manifest.get("rows")
+    if not isinstance(prior_rows, list) or not prior_rows:
+        raise ValueError("Prior manifest has no page split records")
     mapping: dict[str, str] = {}
-    for row in manifest.get("rows", []):
+    for row in prior_rows:
         page, split = str(row.get("page", "")), str(row.get("split", ""))
         if not page or split not in ("train", "val", "test"):
             raise ValueError("Prior manifest contains invalid page split data")
         if page in mapping and mapping[page] != split:
             raise ValueError("Prior manifest already contains page-level leakage")
         mapping[page] = split
+    if set(mapping.values()) != {"train", "val", "test"}:
+        raise ValueError("Prior manifest must contain all three page splits")
     return mapping, hashlib.sha256(raw).hexdigest()
 
 
@@ -104,6 +109,8 @@ def _page_splits(
     if invalid:
         raise ValueError("Prior split map contains an invalid split")
     page_map = {page: prior_splits[page] for page in pages if page in prior_splits}
+    if prior_splits and not page_map:
+        raise ValueError("No source pages overlap the prior manifest; refusing an implicit split reset")
     new_pages = [page for page in pages if page not in page_map]
     random.Random(seed).shuffle(new_pages)
 
