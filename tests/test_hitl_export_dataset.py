@@ -100,6 +100,23 @@ class HitlExportTests(unittest.TestCase):
         self.assertEqual(second["split_source"], "REUSED_PRIOR_MANIFEST")
         self.assertEqual(len(second["prior_manifest_sha256"]), 64)
 
+
+    def test_prior_manifest_with_no_overlapping_pages_fails_closed(self):
+        prior_out = Path(self.tmp.name) / "prior-plan"
+        export_training_dataset(self.db, prior_out, allowed_crop_roots=[self.root])
+        prior_path = prior_out / "manifest.json"
+        prior = json.loads(prior_path.read_text(encoding="utf-8"))
+        for index, row in enumerate(prior["rows"]):
+            row["page"] = f"unrelated-page-{index}"
+        prior_path.write_text(json.dumps(prior, ensure_ascii=False), encoding="utf-8")
+        out = Path(self.tmp.name) / "should-not-export"
+        with self.assertRaises(ValueError):
+            export_training_dataset(
+                self.db, out, allowed_crop_roots=[self.root],
+                prior_manifest=prior_path,
+            )
+        self.assertFalse(out.exists())
+
     def test_existing_output_is_never_overwritten(self):
         out = Path(self.tmp.name) / "existing"
         out.mkdir()
