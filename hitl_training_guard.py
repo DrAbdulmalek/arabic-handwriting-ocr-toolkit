@@ -24,8 +24,23 @@ def verify_hitl_dataset(dataset_dir: str | Path) -> dict[str, Any]:
     manifest = json.loads(manifest_bytes.decode("utf-8"))
     if manifest.get("source") != "HITL_TRAINING_READY_ONLY":
         raise ValueError("Source manifest is not HITL-only")
-    if manifest.get("row_count") != metadata.get("rows"):
+    rows = manifest.get("rows")
+    if not isinstance(rows, list) or manifest.get("row_count") != metadata.get("rows") or len(rows) != metadata.get("rows"):
         raise ValueError("Dataset row count differs from the source manifest")
+    page_splits = {}
+    counts = {"train": 0, "val": 0, "test": 0}
+    for row in rows:
+        page, split = str(row.get("page", "")), str(row.get("split", ""))
+        if not page or split not in counts:
+            raise ValueError("Manifest contains an invalid page or split")
+        if page in page_splits and page_splits[page] != split:
+            raise ValueError("Manifest contains page-level train/test leakage")
+        page_splits[page] = split
+        counts[split] += 1
+    if any(value == 0 for value in counts.values()):
+        raise ValueError("Manifest must contain non-empty train/val/test splits")
+    if counts != metadata.get("split_counts"):
+        raise ValueError("Dataset split counts differ from the source manifest")
     return {
         "source": "HITL_TRAINING_READY_ONLY",
         "source_manifest_sha256": actual_hash,
