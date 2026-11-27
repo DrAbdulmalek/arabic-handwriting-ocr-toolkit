@@ -54,7 +54,7 @@ class CorrectionStoreTests(unittest.TestCase):
         self.assertEqual(len(correction_history(self.db, "c1")), 1)
 
     def test_bad_crop_cannot_be_corrected(self):
-        self.register("bad1", "hash-bad", BAD_CROP)
+        self.register("bad1", "b" * 64, BAD_CROP)
         with self.assertRaises(EligibilityError):
             save_correction(self.db, "bad1", "نص")
 
