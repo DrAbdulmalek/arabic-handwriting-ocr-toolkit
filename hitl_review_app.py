@@ -223,7 +223,7 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
         bad.click(
             lambda c, s, last: move(c, BAD_CROP, s, "", last),
             inputs=[current, source, last_saved_id],
-            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id],
+            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id, corrected],
         )
         next_btn.click(
             lambda c, last: move(c, last_id=last),
