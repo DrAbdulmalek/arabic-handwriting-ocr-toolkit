@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,107 @@ def verify_hitl_dataset(dataset_dir: str | Path) -> dict[str, Any]:
         "source_manifest_sha256": actual_hash,
         "rows": metadata["rows"],
         "split_counts": metadata.get("split_counts", {}),
+    }
+
+
+def verify_datasetdict_content(
+    dataset_dict: Any,
+    dataset_dir: str | Path,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Verify every loaded DatasetDict row against the approved HITL manifest.
+
+    ``verify_hitl_dataset`` only proves the manifest *file* is intact. This
+    closes the remaining provenance gap: it proves the rows that will actually
+    be trained on — texts, raw image bytes, pages, and split membership — match
+    the approved manifest row by row, so any later edit of the saved DatasetDict
+    (altered correction text, swapped image bytes, a row moved between
+    train/val/test while keeping counts equal) is rejected before training.
+
+    Rows are compared as multisets of ``(page, text, image_sha256)`` per split:
+    content equality is what matters, not row order. Error messages name the
+    split, row index, and failing component only — never text values.
+
+    Raises ValueError on the first mismatch; RuntimeError if ``datasets`` is
+    not installed.
+    """
+    try:
+        from datasets import Image as HFImage
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install the project requirements (datasets) to verify DatasetDict content"
+        ) from exc
+
+    dataset_dir_path = Path(dataset_dir).expanduser().resolve(strict=True)
+    if metadata is None:
+        metadata = verify_hitl_dataset(dataset_dir_path)
+    manifest = json.loads(
+        (dataset_dir_path / "hitl_manifest.json").read_bytes().decode("utf-8")
+    )
+    required_splits = ("train", "val", "test")
+    expected: dict[str, Counter[tuple[str, str, str]]] = {s: Counter() for s in required_splits}
+    page_split: dict[str, str] = {}
+    for row in manifest.get("rows", []):
+        page, split = str(row.get("page", "")), str(row.get("split", ""))
+        expected[split][(page, str(row.get("text", "")).strip(), str(row.get("crop_hash", "")))] += 1
+        page_split.setdefault(page, split)
+
+    missing = [s for s in required_splits if s not in dataset_dict]
+    extra = [s for s in dataset_dict if s not in required_splits]
+    if missing or extra:
+        raise ValueError(f"DatasetDict splits differ from HITL manifest (missing={missing}, extra={extra})")
+
+    actual: dict[str, Counter[tuple[str, str, str]]] = {}
+    for split in required_splits:
+        split_ds = dataset_dict[split].cast_column("image", HFImage(decode=False))
+        actual[split] = Counter()
+        for index, row in enumerate(split_ds):
+            page, text = str(row.get("page", "")), str(row.get("text", "")).strip()
+            image = row.get("image") or {}
+            payload = image.get("bytes")
+            if payload is None:
+                stored_path = image.get("path")
+                payload = Path(stored_path).read_bytes() if stored_path else b""
+            image_sha = hashlib.sha256(payload).hexdigest()
+            triple = (page, text, image_sha)
+            if expected[split][triple] <= actual[split][triple]:
+                if page not in page_split:
+                    raise ValueError(f"Split '{split}' row {index}: page '{page}' is not in the approved manifest")
+                if page_split[page] != split:
+                    raise ValueError(
+                        f"Split '{split}' row {index}: page '{page}' belongs to split "
+                        f"'{page_split[page]}' in the manifest (train/test leakage)"
+                    )
+                if not any(t == text for (p, t, h) in expected[split] if p == page):
+                    raise ValueError(
+                        f"Split '{split}' row {index} (page '{page}'): text does not match the "
+                        "approved manifest entry"
+                    )
+                if not any(h == image_sha for (p, t, h) in expected[split] if p == page):
+                    raise ValueError(
+                        f"Split '{split}' row {index} (page '{page}'): image bytes sha256 "
+                        f"{image_sha[:12]}… does not match the approved crop hash"
+                    )
+                raise ValueError(
+                    f"Split '{split}' row {index}: content exceeds the approved manifest rows"
+                )
+            actual[split][triple] += 1
+
+    for split in required_splits:
+        expected_rows = sum(expected[split].values())
+        actual_rows = sum(actual[split].values())
+        if expected_rows != actual_rows or expected[split] != actual[split]:
+            missing_rows = sum((expected[split] - actual[split]).values())
+            raise ValueError(
+                f"Split '{split}' does not match the approved manifest: "
+                f"expected {expected_rows} rows, found {actual_rows}, missing {missing_rows}"
+            )
+    return {
+        "verified": True,
+        "manifest_sha256": metadata["source_manifest_sha256"],
+        "rows": sum(sum(c.values()) for c in actual.values()),
+        "split_counts": {s: sum(actual[s].values()) for s in required_splits},
     }
 
 

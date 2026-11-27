@@ -5,9 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image
+
 from hitl_training_guard import (
-    verify_hitl_dataset, training_metrics_report, require_new_output_paths,
-    require_separate_training_output,
+    verify_hitl_dataset, verify_datasetdict_content, training_metrics_report,
+    require_new_output_paths, require_separate_training_output,
 )
 
 
@@ -102,6 +104,114 @@ class TrainingGuardTests(unittest.TestCase):
         model.mkdir()
         with self.assertRaises(FileExistsError):
             require_new_output_paths(model, checkpoints)
+
+
+class DatasetDictContentGuardTests(unittest.TestCase):
+    """Negative tests: tampering with the loaded DatasetDict must be caught.
+
+    The manifest fingerprint check alone does not prove the rows that will be
+    trained on match the approved manifest — these tests prove the row-level
+    content guard does (texts, image bytes, pages, split membership).
+    """
+    def setUp(self):
+        try:
+            import datasets  # noqa: F401
+        except ImportError:
+            self.skipTest("datasets is installed in the dedicated CI smoke-test step")
+        from datasets import load_from_disk
+        from hitl_hf_adapter import build_hf_dataset
+
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name) / "export"
+        images = root / "images"
+        images.mkdir(parents=True)
+        rows = []
+        for i, split in enumerate(("train", "train", "val", "test")):
+            path = images / f"{i}.png"
+            Image.new("RGB", (10, 8), (i * 40, 30, 90)).save(path)
+            rows.append({
+                "crop_id": f"crop-{i}",
+                "crop_hash": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "image": f"images/{i}.png",
+                "text": f"تصحيح {i}",
+                "expected_text": "توقع",
+                "expected_text_source": "LEGACY_LABEL_UNVERIFIED",
+                "page": f"page-{i}",
+                "split": split,
+                "crop_config_version": "legacy-unknown",
+                "model_version": "legacy-unknown",
+                "batch_id": "test",
+            })
+        manifest = root / "manifest.json"
+        manifest.write_text(json.dumps({
+            "format_version": 1,
+            "source": "HITL_TRAINING_READY_ONLY",
+            "row_count": len(rows),
+            "rows": rows,
+        }, ensure_ascii=False), encoding="utf-8")
+        self.out = Path(self.tmp.name) / "hf-dataset"
+        build_hf_dataset(manifest, self.out)
+        self.ds = load_from_disk(str(self.out))
+        self.load_from_disk = load_from_disk
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_untouched_datasetdict_matches_manifest(self):
+        result = verify_datasetdict_content(self.ds, self.out)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["split_counts"], {"train": 2, "val": 1, "test": 1})
+
+    def test_catches_altered_correction_text(self):
+        ds = dict(self.ds)
+        ds["train"] = self.ds["train"].map(
+            lambda ex, idx: {**ex, "text": "نص معدَّل"} if idx == 0 else ex,
+            with_indices=True,
+        )
+        with self.assertRaises(ValueError):
+            verify_datasetdict_content(ds, self.out)
+
+    def test_catches_swapped_image_bytes(self):
+        from datasets import Image as HFImage
+        ds = dict(self.ds)
+        ds["train"] = (
+            self.ds["train"].cast_column("image", HFImage(decode=False)).map(
+                lambda ex, idx: {
+                    **ex,
+                    "image": {"bytes": b"tampered-bytes", "path": ex["image"]["path"]},
+                } if idx == 0 else ex,
+                with_indices=True,
+            )
+        )
+        with self.assertRaises(ValueError):
+            verify_datasetdict_content(ds, self.out)
+
+    def test_catches_row_moved_between_splits(self):
+        # Move a train row's page to the test page: counts stay equal, content guard must stop it.
+        ds = dict(self.ds)
+        ds["train"] = self.ds["train"].map(
+            lambda ex, idx: {**ex, "page": "page-3"} if idx == 0 else ex,
+            with_indices=True,
+        )
+        with self.assertRaises(ValueError):
+            verify_datasetdict_content(ds, self.out)
+
+    def test_catches_swapped_texts_within_split(self):
+        ds = dict(self.ds)
+        texts = ["تصحيح 0", "تصحيح 1"]
+        ds["train"] = self.ds["train"].map(
+            lambda ex, idx: {**ex, "text": texts[1 - idx]},
+            with_indices=True,
+        )
+        with self.assertRaises(ValueError):
+            verify_datasetdict_content(ds, self.out)
+
+    def test_catches_rebuilt_dataset_with_missing_row(self):
+        from datasets import Dataset
+        ds = dict(self.ds)
+        ds["val"] = Dataset.from_dict({"image": [], "text": [], "page": []})
+        with self.assertRaises(ValueError):
+            verify_datasetdict_content(ds, self.out)
 
 
 if __name__ == "__main__":

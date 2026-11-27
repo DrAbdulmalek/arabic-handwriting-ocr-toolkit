@@ -29,8 +29,8 @@ import jiwer
 
 import toolkit_utils as tu
 from hitl_training_guard import (
-    verify_hitl_dataset, training_metrics_report, require_new_output_paths,
-    require_separate_training_output,
+    verify_hitl_dataset, verify_datasetdict_content, training_metrics_report,
+    require_new_output_paths, require_separate_training_output,
 )
 
 from config import (
@@ -218,6 +218,12 @@ def main():
         split in ds and len(ds[split]) > 0 for split in ("train", "val", "test")
     ):
         sys.exit("❌ HITL dataset must contain non-empty train/val/test splits.")
+    if hitl_metadata:
+        try:
+            verify_datasetdict_content(ds, dataset_path, metadata=hitl_metadata)
+            print("✅ مطابقة صف-بصف: محتوى الـDatasetDict (نصوص/صور/صفوف/تقسيم) يطابق manifest HITL.")
+        except Exception as exc:
+            sys.exit(f"❌ محتوى الـDatasetDict لا يطابق manifest HITL المعتمد — أُوقف التدريب: {exc}")
     train_ds = ds["train"].select_columns(["image", "text"])
     eval_ds = ds["val"].select_columns(["image", "text"]) if "val" in ds and len(ds["val"]) else None
     if eval_ds is None:
