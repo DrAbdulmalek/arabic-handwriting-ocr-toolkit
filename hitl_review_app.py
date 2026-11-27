@@ -97,6 +97,8 @@ class ReviewSession:
             raise ValueError("Choose GOOD_CROP or BAD_CROP explicitly")
         if source not in EXPECTED_TEXT_SOURCES:
             raise ValueError("Invalid expected-text provenance")
+        if quality == GOOD_CROP and not corrected_text.strip():
+            raise ValueError("أدخل النص الصحيح قبل تسجيل القصاصة الجيدة")
         path = _safe_crop_path(candidate["crop_image_ref"], self.roots)
         crop_hash = _sha256_file(path)
         crop_id = str(candidate["crop_id"])
@@ -127,8 +129,6 @@ class ReviewSession:
 
         if quality == BAD_CROP:
             return f"تم استبعاد {crop_id} كقصاصة غير صالحة؛ لن تدخل التصحيح أو التدريب."
-        if not corrected_text.strip():
-            raise ValueError("أدخل النص الصحيح قبل حفظ القصاصة الجيدة")
         save_correction(
             self.db_path, crop_id, corrected_text,
             actor=self.reviewer, reason="human-in-the-loop review",
@@ -167,6 +167,7 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
             candidate["image_path"],
             str(candidate.get("expected_text", "")),
             str(candidate["crop_id"]),
+            candidate.get("expected_text_source", "LEGACY_LABEL_UNVERIFIED"),
             candidate,
             warning,
         )
@@ -188,6 +189,7 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
         expected = gr.Textbox(label="النص المتوقع (للمقارنة)", interactive=False, rtl=True)
         corrected = gr.Textbox(label="النص الصحيح الذي تدخله", lines=2, rtl=True)
         current = gr.State(first)
+        last_saved_id = gr.State(None)
         warning = gr.Markdown("")
         with gr.Row():
             good = gr.Button("قصاصة جيدة — حفظ التصحيح", variant="primary")
@@ -199,22 +201,25 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
             ready_btn = gr.Button("اعتمادها للتدريب المحلي")
         summary = gr.Markdown(session.summary())
 
-        def move(candidate, quality=None, provenance="LEGACY_LABEL_UNVERIFIED", text_value=""):
+        def move(candidate, quality=None, provenance="LEGACY_LABEL_UNVERIFIED", text_value="", last_id=None):
             message = ""
+            reviewed_id = last_id
             if candidate is not None and quality:
                 try:
                     message = session.record(candidate, quality, provenance, text_value)
+                    reviewed_id = str(candidate["crop_id"]) if quality == GOOD_CROP else last_id
                 except Exception as exc:
-                    img, exp, cid, same, warn = render(candidate)
-                    return img, exp, cid, same, warn, f"لم يُحفظ القرار: {exc}", session.summary()
+                    retry = session.next_candidate()
+                    img, exp, cid, src, state, warn = render(retry or candidate)
+                    return img, exp, cid, src, state, warn, f"لم يُحفظ القرار: {exc}", session.summary(), reviewed_id
             nxt = session.next_candidate()
-            img, exp, cid, state, warn = render(nxt)
-            return img, exp, cid, state, warn, message, session.summary()
+            img, exp, cid, src, state, warn = render(nxt)
+            return img, exp, cid, src, state, warn, message, session.summary(), reviewed_id
 
         good.click(
             lambda c, s, t: move(c, GOOD_CROP, s, t),
             inputs=[current, source, corrected],
-            outputs=[image, expected, crop_id, current, warning, status, summary],
+            outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id],
         )
         bad.click(
             lambda c, s: move(c, BAD_CROP, s, ""),
@@ -227,16 +232,16 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
             outputs=[image, expected, crop_id, current, warning, status, summary],
         )
         validate_btn.click(
-            lambda cid: session.validate(cid) if cid else "لا توجد قصاصة محددة.",
-            inputs=[crop_id], outputs=[status],
+            lambda cid: session.validate(cid) if cid else "لا توجد قصاصة محفوظة للتحقق.",
+            inputs=[last_saved_id], outputs=[status],
         )
         ready_btn.click(
-            lambda cid: session.make_training_ready(cid) if cid else "لا توجد قصاصة محددة.",
-            inputs=[crop_id], outputs=[status],
+            lambda cid: session.make_training_ready(cid) if cid else "لا توجد قصاصة محفوظة للاعتماد.",
+            inputs=[last_saved_id], outputs=[status],
         )
         demo.load(
             lambda: (*render(first), session.summary()),
-            outputs=[image, expected, crop_id, current, warning, summary],
+            outputs=[image, expected, crop_id, source, current, warning, summary],
         )
     return demo
 
