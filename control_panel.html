@@ -61,7 +61,7 @@ progress{width:100%;height:.7rem}
     <div class="cmd"><code>python 0_setup_local.py</code><button data-c="python 0_setup_local.py">نسخ</button></div>
     <div class="step"><span class="n">3</span><p>تشغيل محرر المربعات مع QR للجوال:</p></div>
     <div class="cmd"><code>python 7_box_editor_server.py --host 0.0.0.0</code><button data-c="python 7_box_editor_server.py --host 0.0.0.0">نسخ</button></div>
-    <p>ثم افتح <a href="/" target="_blank" rel="noopener">المحرر</a> أو هذه اللوحة على <a href="/panel" target="_blank" rel="noopener">http://127.0.0.1:7863/panel</a> — وامسح رمز QR الظاهر في الطرفية بكاميرا الجوال.</p>
+    <p>ثم افتح <a href="/" target="_blank" rel="noopener">المحرر</a> أو <a href="/panel" target="_blank" rel="noopener">لوحة التحكم</a>. ستظهر نافذة تطلب رمز الوصول؛ اقرأه من الملف المحلي الموضح في الطرفية وأدخله يدوياً. رمز QR يحتوي عنوان الشبكة فقط ولا يتضمن السر.</p>
     <div class="note">أوامر إضافية: <b>مراجعة الوسوم</b> <code>python 3b_review_app.py</code> · <b>تحديث مجموعة التدريب بعد المراجعة</b> <code>python 4_export_dataset.py</code> · <b>التدريب</b> يبقى على Colab T4 (GPU) من الدفتر <code>OCR_Pipeline_Colab.ipynb</code>.</div>
   </div>
 
@@ -77,8 +77,8 @@ progress{width:100%;height:.7rem}
         <p class="small">افتح <a href="https://colab.research.google.com/" target="_blank" rel="noopener">Colab</a> من متصفح الجوال وارفع <code>arabic-handwriting-ocr-toolkit.zip</code> وشغّل دفتر <code>OCR_Pipeline_Colab.ipynb</code> حتى خلية <b>6ج</b> — تطبع لك رابطًا افتحه على نفس الجوال. الحساب كله على سيرفر جوجل، فتعمل من أي شبكة (Wi-Fi أو بيانات).</p>
       </div>
       <div class="stat" style="text-align:right">
-        <b style="color:var(--acc)">ج) الجوال على بيانات + اللابتوب بعيد</b>
-        <p class="small">من اللابتوب: <code>cloudflared tunnel --url http://127.0.0.1:7863</code> (تثبيت: <code>pip install cloudflared</code> لا يلزم — ثنائي مستقل) وانسخ الرابط العام الظاهر وافتحه على الجوال. الرابط مؤقت — أوقف النفق بعد الانتهاء.</p>
+        <b style="color:var(--acc)">ج) الوصول من خارج الشبكة</b>
+        <p class="small">لا تنشئ نفقاً عاماً مباشراً إلى الخادم. إذا احتجت الوصول البعيد فاستخدم شبكة VPN خاصة موثوقة، ولا تفتح منفذ الخادم على الإنترنت. تبقى المصادقة مطلوبة في جميع أوضاع التشغيل.</p>
       </div>
     </div>
     <div class="note">الواجهة مُعايَرة للجوال: سحب حواف المربعات باللمس يعمل، ولا يوجد تمرير أفقي.</div>
@@ -97,12 +97,45 @@ progress{width:100%;height:.7rem}
 
   <div class="card danger">
     <h2>🔐 أمان الرمز</h2>
-    <p class="small">الرمز الذي سبق لصقه في المحادثة يُعد مكشوفًا — <b>ألغِه الآن</b> من صفحة إدارة الرموز وأنشئ رمز Read جديدًا. السكربتات لا تطلب الرمز إلا مخفيًا (getpass أو متغير البيئة) ولا تكتبه في أي ملف.</p>
+    <p class="small">يُنشأ رمز وصول عشوائي جديد عند كل تشغيل ويُحفظ خارج المستودع في <code>~/.config/arabic-handwriting-ocr-toolkit/box-editor.token</code> بصلاحية <b>0600</b>. لا ترسله في المحادثات أو الصور أو الروابط. أدخله في نافذة المتصفح؛ يبقى في ذاكرة الصفحة فقط حتى إغلاقها.</p>
   </div>
 </div>
 
 <script>
 "use strict";
+
+// TASK-02C: يبقى رمز الوصول في ذاكرة الصفحة فقط ويُرسل عبر ترويسة، لا URL ولا Cookie.
+const nativeFetch = window.fetch.bind(window);
+let boxEditorAuthToken = "";
+let boxEditorPromptPromise = null;
+async function requestAccessToken() {
+  if (boxEditorAuthToken) return boxEditorAuthToken;
+  if (!boxEditorPromptPromise) {
+    boxEditorPromptPromise = Promise.resolve(window.prompt(
+      "أدخل رمز الوصول من الملف المحلي ~/.config/arabic-handwriting-ocr-toolkit/box-editor.token"
+    )).then(value => {
+      boxEditorAuthToken = (value || "").trim();
+      return boxEditorAuthToken;
+    }).finally(() => { boxEditorPromptPromise = null; });
+  }
+  return boxEditorPromptPromise;
+}
+window.fetch = async (input, init = {}) => {
+  const original = new Request(input, init);
+  const send = token => {
+    const headers = new Headers(original.headers);
+    if (token) headers.set("X-Auth-Token", token);
+    return nativeFetch(new Request(original.clone(), {headers}));
+  };
+  let response = await send(boxEditorAuthToken);
+  if (response.status !== 401) return response;
+  const token = await requestAccessToken();
+  if (!token) return response;
+  response = await send(token);
+  if (response.status === 401) boxEditorAuthToken = "";
+  return response;
+};
+
 function copyBtn(btn) {
   const t = btn.dataset.c;
   const done = () => { btn.textContent = "✓ نُسخ"; setTimeout(() => btn.textContent = "نسخ", 1500); };
@@ -118,28 +151,39 @@ function copyBtn(btn) {
 }
 document.querySelectorAll(".cmd button").forEach(b => b.addEventListener("click", () => copyBtn(b)));
 
-// الحالة الحية: من نفس الخادم (عند فتحها عبر /panel) أو من 127.0.0.1 (عند فتحها كملف محلي)
+// الحالة الحية: من نفس الخادم (عند فتحها عبر /panel)، أو من 127.0.0.1 فقط عندما تُفتح كملف محلي.
+// لا يُجرَّب 127.0.0.1 على الجوال: هناك يعني الجهاز نفسه، فتُظهر اللوحة أن الخادم متوقف خطأً.
+function healthUrls() {
+  if (location.protocol === "http:" || location.protocol === "https:")
+    return ["api/health", location.origin + "/api/health"];
+  return ["http://127.0.0.1:7863/api/health"];  // ملف محلي: الخادم على الجهاز نفسه (المنفذ الافتراضي)
+}
 async function checkStatus() {
   const badge = document.getElementById("srvBadge");
-  const tries = ["api/health", "http://127.0.0.1:7863/api/health"];
-  for (const u of tries) {
+  for (const u of healthUrls()) {
+    let r;
+    try { r = await fetch(u); } catch (e) { continue; }
+    if (r.status === 401) {
+      badge.className = "badge off";
+      badge.textContent = "🔒 الخادم يعمل؛ أدخل رمز الوصول عند ظهور النافذة";
+      return;
+    }
     try {
-      const r = await fetch(u);
       const j = await r.json();
       badge.className = "badge ok";
       badge.textContent = j.ok ? "✓ الخادم يعمل الآن" : "؟";
       try {
-        const p = await fetch(u.replace("health", "pages")).then(x => x.json());
+        const p = await fetch(u.replace("health", "status")).then(x => x.json());
         document.getElementById("nVer").textContent = p.total_verified.toLocaleString("en");
         const pct = p.total_active ? Math.round(100 * p.total_verified / p.total_active) : 0;
         document.getElementById("progNote").textContent =
-          `تقدم المراجعة الحي: ${p.total_verified.toLocaleString("en")} من ${p.total_active.toLocaleString("en")} كلمة نشطة (${pct}%) — ${p.pages.length} صفحة`;
+          `تقدم المراجعة الحي: ${p.total_verified.toLocaleString("en")} من ${p.total_active.toLocaleString("en")} كلمة نشطة (${pct}%) — ${p.pages} صفحة`;
       } catch (e) {}
       return;
     } catch (e) {}
   }
   badge.className = "badge off";
-  badge.textContent = "✗ الخادم متوقف — شغّله من اللابتوب أو Colab";
+  badge.textContent = "✗ لا اتصال بالخادم — شغّله من اللابتوب أو Colab ثم افتح الرابط المحلي؛ أدخل رمز الوصول عند الطلب";
 }
 checkStatus();
 setInterval(checkStatus, 10000);

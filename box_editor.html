@@ -173,6 +173,39 @@ aside{background:var(--card);border-top:1px solid var(--line);padding:.45rem .75
 
 <script>
 "use strict";
+
+// TASK-02C: يبقى رمز الوصول في ذاكرة الصفحة فقط ويُرسل عبر ترويسة، لا URL ولا Cookie.
+const nativeFetch = window.fetch.bind(window);
+let boxEditorAuthToken = "";
+let boxEditorPromptPromise = null;
+async function requestAccessToken() {
+  if (boxEditorAuthToken) return boxEditorAuthToken;
+  if (!boxEditorPromptPromise) {
+    boxEditorPromptPromise = Promise.resolve(window.prompt(
+      "أدخل رمز الوصول من الملف المحلي ~/.config/arabic-handwriting-ocr-toolkit/box-editor.token"
+    )).then(value => {
+      boxEditorAuthToken = (value || "").trim();
+      return boxEditorAuthToken;
+    }).finally(() => { boxEditorPromptPromise = null; });
+  }
+  return boxEditorPromptPromise;
+}
+window.fetch = async (input, init = {}) => {
+  const original = new Request(input, init);
+  const send = token => {
+    const headers = new Headers(original.headers);
+    if (token) headers.set("X-Auth-Token", token);
+    return nativeFetch(new Request(original.clone(), {headers}));
+  };
+  let response = await send(boxEditorAuthToken);
+  if (response.status !== 401) return response;
+  const token = await requestAccessToken();
+  if (!token) return response;
+  response = await send(token);
+  if (response.status === 401) boxEditorAuthToken = "";
+  return response;
+};
+
 const $ = id => document.getElementById(id);
 const cv = $("cv"), ctx = cv.getContext("2d");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -269,8 +302,15 @@ async function loadPage(name) {
   S.lineCrops.clear();
   d.words.forEach(w => { w.line = lineOf(w); });
   const img = new Image();
-  img.src = "/img/page?name=" + encodeURIComponent(name) + "&t=" + Date.now();
-  await img.decode();
+  const imageResponse = await fetch("/img/page?name=" + encodeURIComponent(name) + "&t=" + Date.now());
+  if (!imageResponse.ok) throw new Error("تعذر تحميل صورة الصفحة: " + imageResponse.status);
+  const imageUrl = URL.createObjectURL(await imageResponse.blob());
+  img.src = imageUrl;
+  try {
+    await img.decode();
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
   S.img = img;
   // ابدأ من أول كلمة غير مؤكدة
   const first = d.words.find(w => !w.ignored && !w.verified);
@@ -838,16 +878,26 @@ $("analyzeBtn").onclick = async () => {
 };
 
 /* ───────── تصدير الصفحة بترتيب القراءة ───────── */
-function exportPage(fmt) {
+async function exportPage(fmt) {
   if (!S.data) return;
-  const a = document.createElement("a");
-  a.href = `/api/export_page?name=${encodeURIComponent(S.data.name)}&fmt=${fmt}`;
-  a.download = `${S.data.name}.${fmt}`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  status(`⬇ صُدِّر ${fmt.toUpperCase()} — المجموعة العلوية أولًا ثم ما يليها`);
-  tel("export_" + fmt);
+  try {
+    const response = await fetch(
+      `/api/export_page?name=${encodeURIComponent(S.data.name)}&fmt=${fmt}`
+    );
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `${S.data.name}.${fmt}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    status(`⬇ صُدِّر ${fmt.toUpperCase()} — المجموعة العلوية أولًا ثم ما يليها`);
+    tel("export_" + fmt);
+  } catch (e) {
+    status("✗ تعذر التصدير: " + e.message, true);
+  }
 }
 $("expTxt").onclick = () => exportPage("txt");
 $("expDocx").onclick = () => exportPage("docx");

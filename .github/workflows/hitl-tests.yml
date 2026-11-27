@@ -11,6 +11,10 @@ on:
       - "hitl_hf_adapter.py"
       - "hitl_training_guard.py"
       - "5_train_trocr_colab.py"
+      - "7_box_editor_server.py"
+      - "control_panel.html"
+      - "box_editor.html"
+      - "tests/test_task02c_security.py"
       - "tests/test_crop_correction_store.py"
       - "tests/test_crop_legacy_adapter.py"
       - "tests/test_hitl_review_app.py"
@@ -31,6 +35,10 @@ on:
       - "hitl_hf_adapter.py"
       - "hitl_training_guard.py"
       - "5_train_trocr_colab.py"
+      - "7_box_editor_server.py"
+      - "control_panel.html"
+      - "box_editor.html"
+      - "tests/test_task02c_security.py"
       - "tests/test_crop_correction_store.py"
       - "tests/test_crop_legacy_adapter.py"
       - "tests/test_hitl_review_app.py"
@@ -67,3 +75,19 @@ jobs:
           python -m unittest discover -s tests -p "test_hitl_crop_feedback.py" -v
           python -m unittest discover -s tests -p "test_hitl_hf_adapter.py" -v
           python -m unittest discover -s tests -p "test_hitl_training_guard.py" -v
+
+  # TASK-02C: بوابة انحدار حراسة الوصول لمحرر المربعات (لا تحتاج gradio ولا datasets)
+  box-editor-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test runtime
+        run: python -m pip install "pytest>=8" "pillow>=10"
+      - name: Compile the box-editor server
+        run: python -m py_compile 7_box_editor_server.py
+      - name: Run access-guard regression tests (TASK-02C)
+        run: python -m pytest tests/test_task02c_security.py -q -p no:cacheprovider
