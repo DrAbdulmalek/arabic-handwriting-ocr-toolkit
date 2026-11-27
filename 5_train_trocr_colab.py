@@ -18,6 +18,7 @@
   - الرمز إن رفعت للـ Hub يُقرأ من متغير البيئة HF_TOKEN (Colab Secrets) فقط.
 """
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -27,28 +28,57 @@ import torch
 import jiwer
 
 import toolkit_utils as tu
+from hitl_training_guard import verify_hitl_dataset, training_metrics_report, require_new_output_paths
+
 from config import (
     DATASET_DIR, TRAIN_OUTPUT_DIR, ENCODER_ID, DECODER_ID, ARABIC_DECODER_ID,
     LATIN_FALLBACK_MODEL, IMAGE_SIZE, MAX_LABEL_TOKENS, SEED,
 )
 
 
-def build_model_and_processors(latin: bool, image_size: int, decoder_id: str):
+def build_model_and_processors(
+    latin: bool, image_size: int, decoder_id: str,
+    init_model: str = "", local_files_only: bool = False,
+):
     from transformers import (
         VisionEncoderDecoderModel, AutoTokenizer, ViTImageProcessor,
     )
+    if init_model:
+        model = VisionEncoderDecoderModel.from_pretrained(
+            init_model, local_files_only=local_files_only
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            init_model, local_files_only=local_files_only
+        )
+        processor = ViTImageProcessor.from_pretrained(
+            init_model, local_files_only=local_files_only
+        )
+        if hasattr(processor, "size") and isinstance(processor.size, dict):
+            processor.size = {"height": image_size, "width": image_size}
+        return model, tokenizer, processor
+
     if latin:
-        model = VisionEncoderDecoderModel.from_pretrained(LATIN_FALLBACK_MODEL)
-        tokenizer = AutoTokenizer.from_pretrained(LATIN_FALLBACK_MODEL)
-        processor = ViTImageProcessor.from_pretrained(LATIN_FALLBACK_MODEL)
+        model = VisionEncoderDecoderModel.from_pretrained(
+            LATIN_FALLBACK_MODEL, local_files_only=local_files_only
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            LATIN_FALLBACK_MODEL, local_files_only=local_files_only
+        )
+        processor = ViTImageProcessor.from_pretrained(
+            LATIN_FALLBACK_MODEL, local_files_only=local_files_only
+        )
         if hasattr(processor, "size") and isinstance(processor.size, dict):
             processor.size = {"height": image_size, "width": image_size}
         return model, tokenizer, processor
 
     model = VisionEncoderDecoderModel.from_encoder_decoder_pretrained(
         ENCODER_ID, decoder_id,
+        encoder_kwargs={"local_files_only": local_files_only},
+        decoder_kwargs={"local_files_only": local_files_only},
     )
-    tokenizer = AutoTokenizer.from_pretrained(decoder_id)
+    tokenizer = AutoTokenizer.from_pretrained(
+        decoder_id, local_files_only=local_files_only
+    )
     model.config.decoder_start_token_id = tokenizer.cls_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
     model.config.eos_token_id = tokenizer.sep_token_id
@@ -60,6 +90,7 @@ def build_model_and_processors(latin: bool, image_size: int, decoder_id: str):
     gc.num_beams = 4
     processor = ViTImageProcessor.from_pretrained(
         ENCODER_ID, size={"height": image_size, "width": image_size},
+        local_files_only=local_files_only,
     )
     return model, tokenizer, processor
 
@@ -121,8 +152,35 @@ def main():
     ap.add_argument("--decoder", default=DECODER_ID,
                     help=f"فك النموذج للإخراج (الافتراضي {DECODER_ID} يغطي ar/en/de؛ "
                          f"لعربي بحت: {ARABIC_DECODER_ID})")
+    ap.add_argument("--init-model", default="",
+                    help="مجلد نموذج سابق محفوظ محلياً؛ يحمّل النموذج لقياس baseline ثم fine-tune")
+    ap.add_argument("--offline", action="store_true",
+                    help="استخدم الملفات المحلية المخزنة فقط، دون تنزيل أوزان")
+    ap.add_argument("--require-hitl", action="store_true",
+                    help="ارفض أي Dataset لا يحمل HITL manifest وبصمة صحيحة")
     ap.add_argument("--push-repo", default="", help="مثال: DrAbdulmalek/trocr-multilingual-handwritten")
     args = ap.parse_args()
+
+    if args.offline:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+    dataset_path = Path(args.dataset).expanduser().resolve()
+    if not dataset_path.exists():
+        sys.exit(f"❌ مجموعة البيانات {dataset_path} غير موجودة.")
+    dataset_manifest_sha256 = None
+    metadata_path = dataset_path / "hitl_dataset_metadata.json"
+    if args.require_hitl or metadata_path.exists():
+        try:
+            verified = verify_hitl_dataset(dataset_path)
+            dataset_manifest_sha256 = verified["source_manifest_sha256"]
+        except Exception as exc:
+            sys.exit(f"❌ فشل التحقق من مصدر HITL: {exc}")
+    if metadata_path.exists() and args.push_repo:
+        sys.exit("❌ رفع نموذج مشتق من Dataset HITL معطل في وضع الخصوصية المحلي.")
+    args.dataset = str(dataset_path)
+    args.out = str(Path(args.out).expanduser().resolve(strict=False))
+    require_new_output_paths(args.out, args.out + "_checkpoints")
 
     from datasets import load_from_disk, Image as HFImage
     from transformers import (
@@ -133,13 +191,20 @@ def main():
         sys.exit(f"❌ مجموعة البيانات {args.dataset} غير موجودة — شغّل الخطوة 4 أولًا.")
 
     print(f"⏳ تحميل النموذج ({'مسار لاتيني' if args.latin else 'ViT + فك ' + args.decoder})…")
-    model, tokenizer, processor = build_model_and_processors(args.latin, args.image_size, args.decoder)
+    model, tokenizer, processor = build_model_and_processors(
+        args.latin, args.image_size, args.decoder,
+        init_model=args.init_model, local_files_only=args.offline,
+    )
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     if device == "cpu":
         print("⚠️ لا توجد GPU — التدريب سيكون بطيئًا جدًا (استخدم Colab مع T4).")
 
     ds = load_from_disk(args.dataset)
+    if args.require_hitl and not all(
+        split in ds and len(ds[split]) > 0 for split in ("train", "val", "test")
+    ):
+        sys.exit("❌ HITL dataset must contain non-empty train/val/test splits.")
     train_ds = ds["train"].select_columns(["image", "text"])
     eval_ds = ds["val"].select_columns(["image", "text"]) if "val" in ds and len(ds["val"]) else None
     if eval_ds is None:
@@ -186,6 +251,15 @@ def main():
         callbacks=[EarlyStoppingCallback(early_stopping_patience=4)],
     )
 
+    baseline = None
+    if args.init_model:
+        print("📏 قياس baseline على مجموعة test نفسها قبل التدريب…")
+        baseline = trainer.evaluate(eval_dataset=test_ds, metric_key_prefix="baseline")
+        print(
+            f"Baseline CER: {baseline.get('baseline_cer', -1):.4f} | "
+            f"WER: {baseline.get('baseline_wer', -1):.4f}"
+        )
+
     print("🚀 بدء التدريب…")
     trainer.train()
     trainer.save_model(args.out)
@@ -194,6 +268,20 @@ def main():
 
     final = trainer.evaluate(eval_dataset=test_ds, metric_key_prefix="test")
     print(f"🏆 نتائج الاختبار النهائية — CER: {final.get('test_cer', -1):.4f} | WER: {final.get('test_wer', -1):.4f}")
+    report = training_metrics_report(
+        dataset_dir=args.dataset,
+        dataset_manifest_sha256=dataset_manifest_sha256,
+        init_model=args.init_model or None,
+        baseline=baseline,
+        final=final,
+        train_count=len(train_ds), val_count=len(eval_ds), test_count=len(test_ds),
+        seed=args.seed, epochs=args.epochs,
+    )
+    metrics_path = Path(args.out) / "training_metrics.json"
+    metrics_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"📄 تقرير baseline/final: {metrics_path}")
 
     # عينات توضيحية من الاختبار
     model.eval()
