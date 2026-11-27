@@ -231,12 +231,18 @@ def build_app(db_path: Path, roots: tuple[Path, ...], reviewer: str):
             outputs=[image, expected, crop_id, source, current, warning, status, summary, last_saved_id, corrected],
         )
         validate_btn.click(
-            lambda cid: session.validate(cid) if cid else "لا توجد قصاصة محفوظة للتحقق.",
-            inputs=[last_saved_id], outputs=[status],
+            lambda cid: (
+                session.validate(cid) if cid else "لا توجد قصاصة محفوظة للتحقق.",
+                session.summary(),
+            ),
+            inputs=[last_saved_id], outputs=[status, summary],
         )
         ready_btn.click(
-            lambda cid: session.make_training_ready(cid) if cid else "لا توجد قصاصة محفوظة للاعتماد.",
-            inputs=[last_saved_id], outputs=[status],
+            lambda cid: (
+                session.make_training_ready(cid) if cid else "لا توجد قصاصة محفوظة للاعتماد.",
+                session.summary(),
+            ),
+            inputs=[last_saved_id], outputs=[status, summary],
         )
         demo.load(
             lambda: (*render(first), session.summary(), ""),
