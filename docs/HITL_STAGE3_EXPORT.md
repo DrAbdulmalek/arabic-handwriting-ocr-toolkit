@@ -9,7 +9,7 @@ human `corrected_text`. It never reads legacy `crops.label` or `verified`.
 ## Safety properties
 
 - Re-resolves every image path and enforces containment in explicit crop roots.
-- Recomputes SHA-256 locally and rejects a mismatch with the registered hash.
+- Verifies each file is a readable image, recomputes SHA-256 locally, and rejects a mismatch with the registered hash.
 - Requires at least three distinct source pages and assigns each page to exactly
   one of train/val/test (no crop-level leakage).
 - Retains original expected text and its provenance in the audit manifest,
