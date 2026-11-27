@@ -74,6 +74,15 @@ def initialize(db_path: str | Path) -> None:
     if not path.is_file():
         raise FileNotFoundError(f"Expected an existing SQLite database: {path}")
     with _connect(path) as conn:
+        meta_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hitl_schema_meta'"
+        ).fetchone()
+        if meta_exists:
+            version_row = conn.execute(
+                "SELECT value FROM hitl_schema_meta WHERE key='schema_version'"
+            ).fetchone()
+            if version_row and int(version_row["value"]) > SCHEMA_VERSION:
+                raise CorrectionStoreError("Database HITL schema is newer than this module")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS hitl_schema_meta (
@@ -132,7 +141,8 @@ def initialize(db_path: str | Path) -> None:
             CREATE INDEX IF NOT EXISTS idx_hitl_batch
                 ON hitl_crop_corrections(batch_id);
 
-            CREATE TRIGGER IF NOT EXISTS hitl_identity_immutable
+            DROP TRIGGER IF EXISTS hitl_identity_immutable;
+            CREATE TRIGGER hitl_identity_immutable
             BEFORE UPDATE OF crop_id, crop_hash, crop_image_ref, source_image_id,
                              expected_text, expected_text_source, crop_quality, quality_evidence,
                              bounding_box_json, crop_config_version, model_version, batch_id
