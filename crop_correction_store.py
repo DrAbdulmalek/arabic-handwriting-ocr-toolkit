@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 _ALLOWED_EXPECTED_TEXT_SOURCES = {
     "ORIGINAL_OCR_OUTPUT", "HUMAN_LABEL", "AUTO_CORRECTION",
     "LEGACY_LABEL_UNVERIFIED",
@@ -134,6 +134,18 @@ def initialize(db_path: str | Path) -> None:
                 manifest_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS hitl_legacy_exclusions (
+                crop_id TEXT PRIMARY KEY,
+                crop_hash TEXT NOT NULL,
+                source_image_id TEXT NOT NULL,
+                reason TEXT NOT NULL CHECK(reason IN
+                    ('USER_SKIPPED','DUPLICATE_HASH','UNREADABLE_IMAGE')),
+                actor TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_hitl_legacy_exclusion_hash
+                ON hitl_legacy_exclusions(crop_hash);
 
             CREATE INDEX IF NOT EXISTS idx_hitl_status_quality
                 ON hitl_crop_corrections(crop_quality, correction_status);
