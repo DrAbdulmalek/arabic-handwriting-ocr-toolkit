@@ -878,16 +878,26 @@ $("analyzeBtn").onclick = async () => {
 };
 
 /* ───────── تصدير الصفحة بترتيب القراءة ───────── */
-function exportPage(fmt) {
+async function exportPage(fmt) {
   if (!S.data) return;
-  const a = document.createElement("a");
-  a.href = `/api/export_page?name=${encodeURIComponent(S.data.name)}&fmt=${fmt}`;
-  a.download = `${S.data.name}.${fmt}`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  status(`⬇ صُدِّر ${fmt.toUpperCase()} — المجموعة العلوية أولًا ثم ما يليها`);
-  tel("export_" + fmt);
+  try {
+    const response = await fetch(
+      `/api/export_page?name=${encodeURIComponent(S.data.name)}&fmt=${fmt}`
+    );
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `${S.data.name}.${fmt}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    status(`⬇ صُدِّر ${fmt.toUpperCase()} — المجموعة العلوية أولًا ثم ما يليها`);
+    tel("export_" + fmt);
+  } catch (e) {
+    status("✗ تعذر التصدير: " + e.message, true);
+  }
 }
 $("expTxt").onclick = () => exportPage("txt");
 $("expDocx").onclick = () => exportPage("docx");
