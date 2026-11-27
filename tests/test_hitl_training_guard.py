@@ -171,6 +171,17 @@ class DatasetDictContentGuardTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_datasetdict_content(ds, self.out)
 
+    def test_catches_leading_or_trailing_whitespace_mutation(self):
+        for changed_text in (" " + self.ds["train"][0]["text"], self.ds["train"][0]["text"] + " "):
+            with self.subTest(changed_text=changed_text):
+                ds = dict(self.ds)
+                ds["train"] = self.ds["train"].map(
+                    lambda ex, idx: {**ex, "text": changed_text} if idx == 0 else ex,
+                    with_indices=True,
+                )
+                with self.assertRaises(ValueError):
+                    verify_datasetdict_content(ds, self.out)
+
     def test_catches_swapped_image_bytes(self):
         from datasets import Image as HFImage
         ds = dict(self.ds)
