@@ -13,6 +13,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from crop_correction_store import (
     BAD_CROP, GOOD_CROP, CORRECTED, VALIDATED, TRAINING_READY,
     initialize, list_pending, register_crop, save_correction,
@@ -36,6 +38,11 @@ def _safe_crop_path(raw: str, roots: tuple[Path, ...]) -> Path:
     allowed = tuple(root.expanduser().resolve(strict=True) for root in roots)
     if not any(candidate == root or root in candidate.parents for root in allowed):
         raise ValueError("Crop path is outside the configured allowed roots")
+    try:
+        with Image.open(candidate) as image:
+            image.verify()
+    except Exception as exc:
+        raise ValueError("Crop file is not a valid, readable image") from exc
     return candidate
 
 
