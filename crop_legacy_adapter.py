@@ -69,22 +69,22 @@ def read_legacy_candidates(
         optional = {name for name in ("ignored", "verified", "confidence", "language",
                                       "x1", "y1", "x2", "y2", "split") if name in columns}
         select_columns = ["id", "page_name", "crop_path", "label"] + sorted(optional)
-        sql = "SELECT " + ", ".join(f'"{name}"' for name in select_columns) + " FROM crops"
-        if "ignored" in columns:
-            sql += " WHERE COALESCE(ignored, 0) = 0"
-        sql += " ORDER BY id LIMIT ?"
-        rows = conn.execute(sql, (limit,)).fetchall()
-
-        hitl_ids: set[str] = set()
         has_hitl = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hitl_crop_corrections'"
         ).fetchone()
+        sql = "SELECT " + ", ".join(f'"{name}"' for name in select_columns) + " FROM crops"
+        conditions = []
+        if "ignored" in columns:
+            conditions.append("COALESCE(ignored, 0) = 0")
         if has_hitl:
-            hitl_ids = {
-                row[0] for row in conn.execute(
-                    "SELECT crop_id FROM hitl_crop_corrections"
-                ).fetchall()
-            }
+            conditions.append(
+                "NOT EXISTS (SELECT 1 FROM hitl_crop_corrections h "
+                "WHERE h.crop_id = 'legacy:' || CAST(crops.id AS TEXT))"
+            )
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY id LIMIT ?"
+        rows = conn.execute(sql, (limit,)).fetchall()
 
         result: list[dict[str, object]] = []
         for row in rows:
