@@ -7,6 +7,7 @@ Call initialize() explicitly; no schema changes happen on import.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -188,6 +189,8 @@ def register_crop(
     confidence: Optional[float] = None,
 ) -> None:
     """Register one crop. Only GOOD_CROP is eligible for human transcription."""
+    if not isinstance(crop_hash, str) or re.fullmatch(r"[0-9a-f]{64}", crop_hash) is None:
+        raise ValueError("crop_hash must be a lowercase SHA-256 hex digest")
     if expected_text_source not in _ALLOWED_EXPECTED_TEXT_SOURCES:
         raise ValueError(f"Unsupported expected_text_source: {expected_text_source}")
     if crop_quality not in _ALLOWED_QUALITY:
