@@ -89,6 +89,9 @@ class HfAdapterTests(unittest.TestCase):
         out = Path(self.tmp.name) / "hf-dataset"
         result = build_hf_dataset(self.manifest, out)
         self.assertFalse(result["uploaded"])
+        self.assertTrue((out / "hitl_manifest.json").is_file())
+        metadata = json.loads((out / "hitl_dataset_metadata.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["source_manifest_sha256"], result["source_manifest_sha256"])
         dataset = load_from_disk(str(out))
         self.assertEqual(set(dataset.keys()), {"train", "val", "test"})
         self.assertEqual(sum(len(dataset[s]) for s in dataset), 3)

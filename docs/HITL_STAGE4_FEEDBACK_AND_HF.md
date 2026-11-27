@@ -42,3 +42,35 @@ for a local-only run.
 
 No database, crop image, manifest, DatasetDict, or model is uploaded by these
 scripts. CI uses synthetic images and temporary databases only.
+
+
+## D. Fine-tune batch two with a measured baseline
+
+Use the previous locally saved model as `--init-model`. The trainer evaluates
+that model on the same held-out test split before fine-tuning, then evaluates
+again after training:
+
+```bash
+python 5_train_trocr_colab.py \
+  --dataset /absolute/path/to/new-hitl-hf-dataset \
+  --init-model /absolute/path/to/previous-trained-model \
+  --out /absolute/path/to/new-batch-two-model \
+  --require-hitl \
+  --offline \
+  --epochs 20
+```
+
+- `--require-hitl` verifies the preserved source manifest fingerprint and
+  train/val/test page isolation before training.
+- `--init-model` loads the previous trained checkpoint; baseline CER/WER is
+  measured on the test split before any new gradient updates.
+- `--offline` requires all model/tokenizer/processor files to be cached locally.
+- Training output and checkpoint directories must be new and separate from the
+  source Dataset directory.
+- A HITL-derived model cannot be pushed to Hugging Face Hub by this script.
+- The output includes `training_metrics.json` with baseline CER/WER, final
+  CER/WER, deltas, split counts, and the source manifest SHA-256.
+
+A negative CER/WER delta is a numerical improvement, but do not claim a
+validated improvement until the same held-out test pages, preprocessing,
+tokenizer, and evaluation settings are confirmed across both runs.
